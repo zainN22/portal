@@ -26,9 +26,11 @@ export interface ChatMessage {
 
 export type GenerationEventKind =
   | 'text'        // assistant thinking/narration
-  | 'file'        // file written: { path, action }
+  | 'file'        // file written
   | 'shell'       // shell command run
+  | 'phase'       // pipeline phase transition (e.g. "Building Navbar & Footer...")
   | 'done'        // generation complete
+  | 'warning'     // non-fatal issue (e.g. max-turns reached but work saved)
   | 'error'
 
 export interface GenerationEvent {
