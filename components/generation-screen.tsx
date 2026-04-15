@@ -92,6 +92,15 @@ export function GenerationScreen({ projectName, phase, events }: Props) {
                     <span className="text-zinc-500 line-clamp-1">{e.data}</span>
                   </>
                 )}
+                {e.kind === 'phase' && (
+                  <>
+                    <span className="text-violet-400 shrink-0 mt-px">→</span>
+                    <span className="text-violet-300 font-sans font-medium">{e.data}</span>
+                  </>
+                )}
+                {e.kind === 'warning' && (
+                  <span className="text-yellow-400 break-all">{e.data}</span>
+                )}
                 {e.kind === 'error' && (
                   <span className="text-red-400 break-all">{e.data}</span>
                 )}

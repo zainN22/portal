@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { ProjectPhase } from '@/types'
 
 type Viewport = 'desktop' | 'tablet' | 'mobile'
@@ -8,6 +8,9 @@ type Viewport = 'desktop' | 'tablet' | 'mobile'
 interface Props {
   port: number | null
   phase: ProjectPhase
+  isBuilding?: boolean
+  buildingLabel?: string
+  refreshTick?: number
 }
 
 const VIEWPORTS: Record<Viewport, { width: string; label: string; icon: string }> = {
@@ -16,14 +19,30 @@ const VIEWPORTS: Record<Viewport, { width: string; label: string; icon: string }
   mobile: { width: '390px', label: 'Mobile', icon: '📲' },
 }
 
-export function PreviewPanel({ port, phase }: Props) {
+export function PreviewPanel({ port, phase, isBuilding = false, buildingLabel = '', refreshTick = 0 }: Props) {
   const [viewport, setViewport] = useState<Viewport>('desktop')
   const [reloadKey, setReloadKey] = useState(0)
+
+  // Reload the iframe whenever the pipeline signals a phase completed
+  useEffect(() => {
+    if (refreshTick > 0) setReloadKey((k) => k + 1)
+  }, [refreshTick])
 
   const previewUrl = port ? `http://localhost:${port}` : null
 
   return (
     <div className="flex flex-col h-full bg-zinc-900">
+      {/* Building progress bar — visible while layout/page sessions are running */}
+      {isBuilding && (
+        <div className="shrink-0 bg-violet-950 border-b border-violet-800 px-4 py-2 flex items-center gap-3">
+          <div className="w-3.5 h-3.5 border-2 border-violet-400 border-t-transparent rounded-full animate-spin shrink-0" />
+          <span className="text-xs text-violet-300 truncate">
+            {buildingLabel || 'Building...'}
+          </span>
+          <span className="ml-auto text-xs text-violet-500">Preview updates automatically</span>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-2.5 border-b border-zinc-800 shrink-0">
         {/* Viewport switcher */}

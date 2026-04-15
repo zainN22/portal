@@ -7,11 +7,12 @@ import type { ChatMessage, Project, ProjectPhase } from '@/types'
 interface Props {
   project: Project
   phase: ProjectPhase
+  isPipelineRunning?: boolean
   onPhaseChange: (phase: ProjectPhase) => void
   onProceed: (dirPath: string, projectName: string, overviewContent: string) => void
 }
 
-export function ChatPanel({ project, phase, onPhaseChange, onProceed }: Props) {
+export function ChatPanel({ project, phase, isPipelineRunning = false, onPhaseChange, onProceed }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
@@ -167,7 +168,6 @@ export function ChatPanel({ project, phase, onPhaseChange, onProceed }: Props) {
   const handleSetup = async () => {
     if (!projectName.trim()) { setDirError('Please enter a project name'); return }
     if (!dirPath.trim()) { setDirError('Please enter a folder path'); return }
-    if (!overviewContent.trim()) { setDirError('Requirements not yet ready — please wait a moment and try again'); return }
     setDirError('')
     setSettingUp(true)
 
@@ -199,7 +199,9 @@ export function ChatPanel({ project, phase, onPhaseChange, onProceed }: Props) {
   }
 
   const isPreviewPhase = phase === 'preview' || phase === 'complete'
-  const canChat = (phase === 'gathering' || (phase === 'ready' && !isReady)) || isPreviewPhase
+  // Block editing while the build pipeline is still running (layout/pages sessions)
+  const canEdit = isPreviewPhase && !isPipelineRunning
+  const canChat = (phase === 'gathering' || (phase === 'ready' && !isReady)) || canEdit
 
   return (
     <div className="flex flex-col h-full bg-zinc-950">
@@ -257,11 +259,18 @@ export function ChatPanel({ project, phase, onPhaseChange, onProceed }: Props) {
               />
             </div>
 
+            {!overviewContent && (
+              <div className="flex items-center gap-2 text-xs text-zinc-500">
+                <div className="w-3 h-3 border border-zinc-500 border-t-transparent rounded-full animate-spin shrink-0" />
+                Preparing requirements...
+              </div>
+            )}
+
             {dirError && <p className="text-xs text-red-400">{dirError}</p>}
 
             <button
               onClick={handleSetup}
-              disabled={settingUp || !projectName.trim() || !dirPath.trim()}
+              disabled={settingUp || !projectName.trim() || !dirPath.trim() || !overviewContent}
               className="w-full py-2.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-xl transition-colors"
             >
               {settingUp ? 'Setting up...' : 'Create project and start building →'}
@@ -272,6 +281,16 @@ export function ChatPanel({ project, phase, onPhaseChange, onProceed }: Props) {
         <div ref={bottomRef} />
       </div>
 
+      {/* Building status — shown in chat panel while pipeline is finishing */}
+      {isPreviewPhase && isPipelineRunning && (
+        <div className="px-4 py-3 border-t border-zinc-800 shrink-0">
+          <div className="flex items-center gap-2 text-xs text-zinc-500">
+            <div className="w-3 h-3 border-2 border-violet-500 border-t-transparent rounded-full animate-spin shrink-0" />
+            Building remaining pages — edits available once complete
+          </div>
+        </div>
+      )}
+
       {/* Input bar */}
       {canChat && (
         <div className="px-4 py-3 border-t border-zinc-800 shrink-0">
@@ -280,13 +299,13 @@ export function ChatPanel({ project, phase, onPhaseChange, onProceed }: Props) {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={isPreviewPhase ? 'Describe a change...' : 'Tell me about your app...'}
+              placeholder={canEdit ? 'Describe a change...' : 'Tell me about your app...'}
               disabled={streaming}
               rows={1}
               className="flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 resize-none outline-none max-h-32 overflow-y-auto"
             />
             <button
-              onClick={isPreviewPhase ? sendEdit : sendMessage}
+              onClick={canEdit ? sendEdit : sendMessage}
               disabled={!input.trim() || streaming}
               className="p-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors shrink-0"
             >
