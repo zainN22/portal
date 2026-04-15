@@ -23,6 +23,13 @@ export default function ProjectPage({ params }: Props) {
   const [genEvents, setGenEvents] = useState<GenerationEvent[]>([])
   const [projectName, setProjectName] = useState('Your app')
 
+  // Pipeline progress — true while any Claude Code session is still running
+  // after the preview first appears (layout + page sessions)
+  const [isPipelineRunning, setIsPipelineRunning] = useState(false)
+  const [pipelinePhaseLabel, setPipelinePhaseLabel] = useState('')
+  // Incrementing this causes the preview iframe to reload
+  const [previewRefreshTick, setPreviewRefreshTick] = useState(0)
+
   // Resizable divider
   const [panelWidth, setPanelWidth] = useState(420)
   const [dragging, setDragging] = useState(false)
@@ -57,7 +64,13 @@ export default function ProjectPage({ params }: Props) {
     setProject((prev) => prev ? { ...prev, phase: 'writing-specs' } : prev)
 
     await runSkill('generate-specs')
-    await runSkill('build-frontend')
+    setIsPipelineRunning(true)
+    try {
+      await runSkill('build-frontend')
+    } finally {
+      setIsPipelineRunning(false)
+      setPipelinePhaseLabel('')
+    }
   }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const runSkill = async (skill: string) => {
@@ -99,13 +112,30 @@ export default function ProjectPage({ params }: Props) {
         if (payload.text)    setGenEvents((p) => [...p, { kind: 'text',  data: payload.text as string }])
         if (payload.path)    setGenEvents((p) => [...p, { kind: 'file',  data: payload.path as string }])
         if (payload.command) setGenEvents((p) => [...p, { kind: 'shell', data: payload.command as string }])
-        if (payload.message) setGenEvents((p) => [...p, { kind: 'error', data: payload.message as string }])
         if (payload.skill)   setGenEvents((p) => [...p, { kind: 'done',  data: `${payload.skill} complete` }])
+
+        if (eventName === 'phase' && payload.label) {
+          const label = payload.label as string
+          setPipelinePhaseLabel(label)
+          setGenEvents((p) => [...p, { kind: 'phase', data: label }])
+        }
+
+        if (eventName === 'warning' && payload.message) {
+          setGenEvents((p) => [...p, { kind: 'warning', data: payload.message as string }])
+        }
+
+        if (eventName === 'error' && payload.message) {
+          setGenEvents((p) => [...p, { kind: 'error', data: payload.message as string }])
+        }
 
         if (eventName === 'preview-ready' && payload.port) {
           setPhase('preview')
           setProject((prev) => prev ? { ...prev, phase: 'preview' } : prev)
           setPreviewPort(payload.port as number)
+        }
+
+        if (eventName === 'preview-refresh') {
+          setPreviewRefreshTick((t) => t + 1)
         }
 
         eventName = ''
@@ -145,6 +175,7 @@ export default function ProjectPage({ params }: Props) {
         <ChatPanel
           project={project}
           phase={phase}
+          isPipelineRunning={isPipelineRunning}
           onPhaseChange={handlePhaseChange}
           onProceed={handleProceed}
         />
@@ -153,7 +184,13 @@ export default function ProjectPage({ params }: Props) {
       <div onMouseDown={onMouseDown} className="w-1 cursor-col-resize bg-zinc-800 hover:bg-violet-600 transition-colors shrink-0" />
 
       <div className="flex-1 min-w-0">
-        <PreviewPanel port={previewPort} phase={phase} />
+        <PreviewPanel
+          port={previewPort}
+          phase={phase}
+          isBuilding={isPipelineRunning}
+          buildingLabel={pipelinePhaseLabel}
+          refreshTick={previewRefreshTick}
+        />
       </div>
     </div>
   )
