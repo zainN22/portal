@@ -32,8 +32,9 @@ export function initProject(name: string): Project {
  * Creates:
  *   {userPath}/{projectName}/
  *     ├── overview.md          ← condensed from the chat conversation
- *     ├── client-x/            ← empty, Claude Code will populate
- *     ├── server-x/            ← empty, Claude Code will populate
+ *     ├── client/              ← scaffolded by Claude Code
+ *     ├── server/              ← scaffolded by Claude Code
+ *     ├── documentation/       ← context handoff files between sessions
  *     └── .claude/
  *         ├── commands/        ← skill files (generate-specs, build-frontend, etc.)
  *         └── examples/        ← sample spec files for format reference
@@ -53,8 +54,9 @@ export function setupProjectDir(
   fs.mkdirSync(projectDir, { recursive: true })
 
   // Scaffold the directory structure
-  fs.mkdirSync(path.join(projectDir, 'client-x'), { recursive: true })
-  fs.mkdirSync(path.join(projectDir, 'server-x'), { recursive: true })
+  fs.mkdirSync(path.join(projectDir, 'client'), { recursive: true })
+  fs.mkdirSync(path.join(projectDir, 'server'), { recursive: true })
+  fs.mkdirSync(path.join(projectDir, 'documentation'), { recursive: true })
 
   // Write overview.md — this IS the requirements document
   fs.writeFileSync(path.join(projectDir, 'overview.md'), overviewContent, 'utf-8')

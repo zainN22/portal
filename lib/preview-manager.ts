@@ -18,7 +18,7 @@ export async function startPreview(projectId: string, projectDir: string): Promi
   // Stop any existing preview for this project
   await stopPreview(projectId)
 
-  const clientDir = path.join(projectDir, 'client-x')
+  const clientDir = path.join(projectDir, 'client')
   const port = await findFreePort(PORT_RANGE_START)
 
   const proc = execa('npm', ['run', 'dev', '--', '--port', String(port), '--hostname', '0.0.0.0'], {

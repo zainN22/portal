@@ -2,6 +2,17 @@
  * Creates the .claude/commands/ skill files and .claude/examples/
  * in the project directory. These files are the programmatic instructions
  * that tell Claude Code how to write specs and generate code.
+ *
+ * Build pipeline (each step is its own Claude Code session):
+ *   generate-specs  → writes all spec files + CLAUDE.md
+ *   scaffold-frontend → creates Next.js app, tokens, .env, .gitignore
+ *   build-layout    → Navbar, Footer, root layout only
+ *   build-page      → one page per session (page name injected at call time)
+ *   build-backend   → full backend + wires frontend
+ *   apply-change    → targeted edits for user requests
+ *
+ * Context handoff: each session writes documentation/{phase}.md so the
+ * next session reads that summary instead of scanning source files.
  */
 
 import fs from 'fs'
@@ -16,12 +27,12 @@ export function writeSkillFiles(projectDir: string): void {
   fs.mkdirSync(commandsDir, { recursive: true })
   fs.mkdirSync(examplesDir, { recursive: true })
 
-  // Copy sample spec files as format examples
   copySamples(examplesDir)
 
-  // Write each skill file
   fs.writeFileSync(path.join(commandsDir, 'generate-specs.md'), GENERATE_SPECS_SKILL)
-  fs.writeFileSync(path.join(commandsDir, 'build-frontend.md'), BUILD_FRONTEND_SKILL)
+  fs.writeFileSync(path.join(commandsDir, 'scaffold-frontend.md'), SCAFFOLD_FRONTEND_SKILL)
+  fs.writeFileSync(path.join(commandsDir, 'build-layout.md'), BUILD_LAYOUT_SKILL)
+  fs.writeFileSync(path.join(commandsDir, 'build-page.md'), BUILD_PAGE_SKILL)
   fs.writeFileSync(path.join(commandsDir, 'build-backend.md'), BUILD_BACKEND_SKILL)
   fs.writeFileSync(path.join(commandsDir, 'apply-change.md'), APPLY_CHANGE_SKILL)
 }
@@ -49,89 +60,200 @@ const GENERATE_SPECS_SKILL = `# generate-specs
 
 You are generating the complete spec structure for a web project.
 
-## Step 1 — Confirm you can read the project context
+## Step 1 — Read the project overview
 Run: \`cat overview.md\`
-If the file is empty or missing, stop and say "overview.md is missing or empty — cannot proceed."
-Otherwise, confirm you read it by summarising the project in one sentence before continuing.
+If it is empty or missing, stop and say "overview.md is missing — cannot proceed."
+Summarise the project in one sentence before continuing.
 
-## Step 2 — Read the project context fully
-Re-read \`overview.md\` carefully. Understand the project deeply before doing anything else.
+## Step 2 — Decide which spec files this project needs
 
-## Step 3 — Decide what spec files this project needs
+There is NO fixed list. Reason from the overview:
 
-There is NO fixed list. Reason through it based on what you read:
+**Frontend (if any):**
+- Always: \`client/specs/overview.md\` — stack, folder structure, conventions
+- If there's a design system: \`client/specs/design/tokens.md\` and \`client/specs/design/components.md\`
+- For each major page or page group: \`client/specs/pages/{name}.md\`
+- If frontend fetches from an API: \`client/specs/data-fetching.md\`
+- If global UI state: \`client/specs/state.md\`
+- If assets/copy: \`client/specs/content/assets.md\`
+- If realtime/websockets in the UI: \`client/specs/realtime.md\`
 
-**For the frontend (if any):**
-- Always: \`client-x/specs/overview.md\` — frontend stack, folder structure, conventions
-- If there's a design system / brand: \`client-x/specs/design/tokens.md\` and \`client-x/specs/design/components.md\`
-- For each major page or page group: \`client-x/specs/pages/{name}.md\`
-- If frontend fetches from an API: \`client-x/specs/data-fetching.md\`
-- If there's global UI state: \`client-x/specs/state.md\`
-- If there are assets, images, copy: \`client-x/specs/content/assets.md\`
-- If there's realtime/websockets in the UI: \`client-x/specs/realtime.md\`
-
-**For the backend (if any):**
-- Always: \`server-x/specs/overview.md\` — server stack, folder structure, conventions
-- If there's persistent data: \`server-x/specs/database.md\`
-- If there's business logic: \`server-x/specs/services.md\`
-- If there's a REST API: \`server-x/specs/api-routes.md\`
-- If there are background jobs, queues, email: \`server-x/specs/jobs.md\`
-- If there are websockets server-side: \`server-x/specs/websocket.md\`
-- If there are env vars / deployments: \`server-x/specs/environments.md\`
+**Backend (if any):**
+- Always: \`server/specs/overview.md\` — stack, folder structure, conventions
+- If persistent data: \`server/specs/database.md\`
+- If business logic: \`server/specs/services.md\`
+- If REST API: \`server/specs/api-routes.md\`
+- If background jobs/queues/email: \`server/specs/jobs.md\`
+- If websockets server-side: \`server/specs/websocket.md\`
+- If env vars / deployment: \`server/specs/environments.md\`
 
 **Shared (if both frontend and backend exist):**
 - \`server-client-communication.md\` — REST shapes, auth tokens, error codes, WS events
 
-## Step 4 — Write each spec file
+## Step 3 — Write each spec file
 
 Look at the example spec files in \`.claude/examples/\` — these show the exact level of
 detail and writing style to use. They are FORMAT references only. Do not copy their content.
 
-Write specs that are specific to THIS project:
+Write specs specific to THIS project:
 - Use the actual app name, not placeholders
-- Define real color values, real route names, real schema fields
-- Describe actual UI components needed, not generic ones
+- Define real colour values, real route names, real schema fields
+- Describe actual UI components needed
 - Be thorough — the spec is the blueprint for the entire codebase
 
-## Step 5 — Write CLAUDE.md last
+## Step 4 — Write CLAUDE.md last
 
 CLAUDE.md must:
 1. State the role: "You are building {app name}"
-2. List every spec file you created in the ORDER Claude Code should read them before writing code
-3. Define hard rules specific to this project (e.g., "NEVER hardcode colors, always use tokens")
+2. List every spec file created in the ORDER they should be read before writing code
+3. Define hard rules specific to this project (e.g. "NEVER hardcode colours, always use tokens")
 4. Define the tech stack
-5. Define the folder structure for the generated code
+5. Define the folder structure
 
 Use \`.claude/examples/CLAUDE.md\` as a format reference.
 `
 
-// ─── Skill: Build Frontend ────────────────────────────────────────────────────
+// ─── Skill: Scaffold Frontend ─────────────────────────────────────────────────
 
-const BUILD_FRONTEND_SKILL = `# build-frontend
+const SCAFFOLD_FRONTEND_SKILL = `# scaffold-frontend
 
-You are generating the complete frontend codebase for this project.
+You are setting up the initial Next.js project scaffold. Your ONLY job this session is to
+create the project, install dependencies, apply global tokens, and create env/gitignore files.
+Do NOT build any components or pages.
 
-## Step 1 — Read all specs
-Open \`CLAUDE.md\`. Read it fully. It lists every spec file in the order you must read them.
-Read every single spec file before writing a single line of code.
+## Step 1 — Read context
+Read \`overview.md\`, then \`CLAUDE.md\`, then \`client/specs/overview.md\`.
+Summarise the stack and key conventions in one sentence before continuing.
 
-## Step 2 — Scaffold if needed
-Check if \`client-x/package.json\` exists. If not, scaffold with:
+## Step 2 — Scaffold
+Check if \`client/package.json\` exists. If not, run:
 \`\`\`
-npx create-next-app@latest client-x --typescript --tailwind --app --no-git --no-eslint --yes
+npx create-next-app@latest client --typescript --tailwind --app --no-git --no-eslint --yes
 \`\`\`
+Wait for it to finish completely before proceeding.
 
-## Step 3 — Generate all code
-Implement everything the specs describe. Rules:
-- No stubbed components, no placeholder content, no TODO comments
-- Real components with correct styles matching the design tokens spec exactly
-- Real page layouts matching the page specs exactly
-- All copy from the assets/content spec
-- Follow the folder structure defined in CLAUDE.md
+## Step 3 — Apply design tokens
+Read \`client/specs/design/tokens.md\`.
+- Define all colour, typography, and spacing values as CSS custom properties in \`client/src/app/globals.css\`
+- Remove all default Next.js boilerplate styles (keep only the :root token block and base resets)
+- Apply the project font via next/font in \`client/src/app/layout.tsx\`
 
-## Step 4 — Verify the build
-Run: \`cd client-x && npm run build\`
-Fix all TypeScript and build errors. The build MUST succeed before you stop.
+## Step 4 — Create environment and gitignore files
+- Write \`client/.env.example\` with placeholder values for every env var the project will need
+  (derive these from the specs — API URLs, keys, feature flags, etc.)
+- Write \`client/.env\` with the same keys set to empty strings (never commit real secrets)
+- Write \`client/.gitignore\`:
+  node_modules/
+  .next/
+  out/
+  .env
+  .env.local
+  .DS_Store
+
+## Step 5 — Verify
+Run: \`cd client && npm run build\`
+Fix all TypeScript and build errors. The build MUST pass before continuing.
+
+## Step 6 — Write handoff documentation
+Write \`documentation/scaffold.md\` with the following sections:
+
+### Packages installed
+List every dependency and devDependency (name + version from package.json).
+
+### CSS token variables
+List every CSS custom property defined in globals.css (e.g. --color-primary: #FF6B2C).
+
+### Folder structure
+Show the directory tree created under client/ (exclude node_modules and .next).
+
+### Conventions
+Note any important conventions established (font loading approach, any path aliases, etc.).
+
+Then STOP. Write nothing else.
+`
+
+// ─── Skill: Build Layout ──────────────────────────────────────────────────────
+
+const BUILD_LAYOUT_SKILL = `# build-layout
+
+You are building the shared layout components for this project: Navbar, Footer, and the root
+layout wrapper. Do NOT build any page content or page-specific sections this session.
+
+## Step 1 — Read context (do not scan source files)
+Read these files in order — this is all the context you need:
+1. \`documentation/scaffold.md\` — packages available, token variable names, folder structure
+2. \`client/specs/design/tokens.md\` — colour/spacing values
+3. \`client/specs/design/components.md\` — component primitives to use
+4. \`CLAUDE.md\` — project rules and stack
+
+## Step 2 — Build layout components
+Build ONLY these three files:
+- \`client/src/components/layout/Navbar.tsx\`
+- \`client/src/components/layout/Footer.tsx\`
+- \`client/src/app/layout.tsx\` (imports Navbar + Footer, wraps {children})
+
+Rules:
+- Use CSS custom properties from globals.css — never hardcode colours or spacing
+- Use fonts from the root layout, not re-imported per-component
+- Keep Navbar and Footer purely presentational — no data fetching
+
+## Step 3 — Verify
+Run: \`cd client && npm run build\`
+Fix all errors. Build MUST pass before continuing.
+
+## Step 4 — Write handoff documentation
+Write \`documentation/layout.md\` with:
+
+### Components built
+For each component: file path, a one-line description, and its props interface.
+
+### Styles used
+List CSS custom properties used and any Tailwind utility classes that form the visual identity.
+
+### Navigation links
+List every nav link defined (label + href).
+
+Then STOP. Write nothing else.
+`
+
+// ─── Skill: Build Page ────────────────────────────────────────────────────────
+
+const BUILD_PAGE_SKILL = `# build-page
+
+You are building a single page and its section components.
+The page name and spec file are specified at the end of this prompt.
+
+## Step 1 — Read context (do not scan source files)
+Read these files in order:
+1. \`documentation/scaffold.md\` — packages, tokens, folder structure
+2. \`documentation/layout.md\` — existing layout components and their props
+3. \`documentation/pages.md\` (if it exists) — pages already built, components already created
+4. The page spec file named at the end of this prompt
+
+Do NOT read any other source files. The documentation above contains all the context you need.
+
+## Step 2 — Build the page
+- Section components go in \`client/src/components/sections/\`
+- The page file goes in \`client/src/app/{route}/page.tsx\`
+- Reuse layout components from \`documentation/layout.md\` — do not recreate them
+- Use CSS custom properties from globals.css — never hardcode colours
+- All copy must come from the spec — no placeholder text
+
+## Step 3 — Verify
+Run: \`cd client && npm run build\`
+Fix all errors. Build MUST pass before continuing.
+
+## Step 4 — Update handoff documentation
+Append to \`documentation/pages.md\` (create if it does not exist):
+
+### {PageName} page
+- Route: /{route}
+- Page file: client/src/app/{route}/page.tsx
+- Section components: list each file path and a one-line description
+
+Then STOP. Write nothing else.
+
+---
 `
 
 // ─── Skill: Build Backend ─────────────────────────────────────────────────────
@@ -140,60 +262,80 @@ const BUILD_BACKEND_SKILL = `# build-backend
 
 You are generating the complete backend codebase and wiring it to the frontend.
 
-## Step 1 — Read all specs
-Read \`CLAUDE.md\`, then all server-x specs, then \`server-client-communication.md\`.
+## Step 1 — Read context
+Read \`CLAUDE.md\`, then all \`server/specs/\` files, then \`server-client-communication.md\`.
+Also read \`documentation/scaffold.md\` and \`documentation/pages.md\` to understand what the
+frontend expects.
 
-## Step 2 — Scaffold if needed
-Check if \`server-x/package.json\` exists. If not, scaffold based on the stack in
-\`server-x/specs/overview.md\`.
+## Step 2 — Scaffold
+Check if \`server/package.json\` exists. If not, scaffold based on the stack in
+\`server/specs/overview.md\`. Place all source code under \`server/src/\`.
+
+Create:
+- \`server/.env.example\` with all required env var keys
+- \`server/.env\` with keys set to empty strings
+- \`server/.gitignore\` (node_modules/, dist/, .env)
 
 ## Step 3 — Generate backend code
 Implement everything in the server specs:
-- Database schema and migrations
-- Service layer (business logic)
-- API routes with correct middleware and auth guards
+- Database schema and migrations under \`server/src/db/\`
+- Service layer under \`server/src/services/\`
+- API routes under \`server/src/routes/\` with correct middleware and auth guards
 - Background jobs if specified
-- Environment variable setup (.env.example)
+- Entry point at \`server/src/index.ts\` (or main file per the spec)
 
 ## Step 4 — Wire frontend to backend
 Update the frontend to call real API endpoints:
-- Add API client setup per \`client-x/specs/data-fetching.md\`
+- Add API client setup per \`client/specs/data-fetching.md\`
 - Replace any hardcoded/mock data with real API calls
-- Add \`NEXT_PUBLIC_API_URL\` env var pointing to the backend
+- Add \`NEXT_PUBLIC_API_URL\` to \`client/.env\` and \`client/.env.example\`
 
-## Step 5 — Verify both build
-Run both \`npm run build\` commands. Fix all errors before stopping.
+## Step 5 — Verify both builds
+Run \`cd client && npm run build\`, then verify the server compiles (\`cd server && npm run build\` or \`tsc --noEmit\`).
+Fix all errors before stopping.
+
+## Step 6 — Write handoff documentation
+Write \`documentation/backend.md\` with:
+- API routes list (method, path, description)
+- Database tables/collections
+- Environment variables required
 `
 
 // ─── Skill: Apply Change ──────────────────────────────────────────────────────
 
 const APPLY_CHANGE_SKILL = `# apply-change
 
-A user has requested a change to the running application. The request follows this message.
+A user has requested a change to the running application. The request follows this prompt.
 
-## How to approach it
+## Step 1 — Read context
+Read \`documentation/scaffold.md\`, \`documentation/layout.md\`, and \`documentation/pages.md\`
+to understand what exists. Only open source files you actually need to edit.
 
-1. **Identify** what files are affected (spec files and/or code files)
+## Step 2 — Identify the change type and act
 
-2. **If it is a design decision** (color, spacing, typography, layout pattern):
-   - Update the relevant spec file (tokens.md, components.md, etc.)
-   - Update the code to match
-   - Keep spec and code in sync
+**Design change** (colour, spacing, typography):
+- Update the relevant spec file (tokens.md, components.md)
+- Update globals.css or the component
+- Keep spec and code in sync
 
-3. **If it is a content change** (copy, images, labels):
-   - Update the relevant content/assets spec
-   - Update the code
+**Content change** (copy, images, labels):
+- Update the relevant content/assets spec
+- Update the component
 
-4. **If it is a new feature or new section**:
-   - Update or add to the relevant spec file to document it
-   - Then write the code
+**New feature or section**:
+- Update or add to the relevant spec file
+- Write the code
 
-5. **If it is a structural/layout change**:
-   - Update the relevant page spec
-   - Update the code
+**Structural/layout change**:
+- Update the relevant page spec
+- Update the code
+
+## Step 3 — Verify
+Run: \`cd client && npm run build\`
+Fix any errors introduced by your change.
 
 ## Rules
 - Make the MINIMAL change needed. Do not refactor unrelated code.
-- Do not change things the user did not ask about.
-- After making changes, verify the file compiles (run \`npm run build\` in client-x if touching frontend).
+- Do not change anything the user did not ask about.
+- Update \`documentation/pages.md\` if you add or remove a component.
 `
