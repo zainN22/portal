@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { HiComputerDesktop, HiDeviceTablet, HiDevicePhoneMobile } from 'react-icons/hi2'
+import { HiRefresh } from 'react-icons/hi'
 import type { ProjectPhase } from '@/types'
 
 type Viewport = 'desktop' | 'tablet' | 'mobile'
@@ -8,22 +10,20 @@ type Viewport = 'desktop' | 'tablet' | 'mobile'
 interface Props {
   port: number | null
   phase: ProjectPhase
-  /** True while we are restarting the dev server for a previously-built project. */
   isRestarting?: boolean
   refreshTick?: number
 }
 
-const VIEWPORTS: Record<Viewport, { width: string; label: string; icon: string }> = {
-  desktop: { width: '100%', label: 'Desktop', icon: '🖥' },
-  tablet: { width: '768px', label: 'Tablet', icon: '📱' },
-  mobile: { width: '390px', label: 'Mobile', icon: '📲' },
+const VIEWPORTS: Record<Viewport, { width: string; label: string; icon: React.ReactNode }> = {
+  desktop: { width: '100%',  label: 'Desktop', icon: <HiComputerDesktop size={16} /> },
+  tablet:  { width: '768px', label: 'Tablet',  icon: <HiDeviceTablet    size={16} /> },
+  mobile:  { width: '390px', label: 'Mobile',  icon: <HiDevicePhoneMobile size={16} /> },
 }
 
 export function PreviewPanel({ port, phase, isRestarting = false, refreshTick = 0 }: Props) {
   const [viewport, setViewport] = useState<Viewport>('desktop')
   const [reloadKey, setReloadKey] = useState(0)
 
-  // Reload the iframe whenever the pipeline signals a phase completed
   useEffect(() => {
     if (refreshTick > 0) setReloadKey((k) => k + 1)
   }, [refreshTick])
@@ -33,16 +33,19 @@ export function PreviewPanel({ port, phase, isRestarting = false, refreshTick = 
   return (
     <div className="flex flex-col h-full bg-zinc-900">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-zinc-800 shrink-0">
-        {/* Viewport switcher */}
-        <div className="flex gap-1 bg-zinc-800 rounded-lg p-0.5">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 shrink-0">
+
+        {/* Viewport switcher — same height as URL bar */}
+        <div className="flex items-center gap-0.5 bg-zinc-800 border border-zinc-700/60 rounded-lg p-0.5 h-8">
           {(Object.keys(VIEWPORTS) as Viewport[]).map((v) => (
             <button
               key={v}
               onClick={() => setViewport(v)}
               title={VIEWPORTS[v].label}
-              className={`px-2.5 py-1 rounded-md text-xs transition-colors ${
-                viewport === v ? 'bg-zinc-600 text-white' : 'text-zinc-500 hover:text-zinc-300'
+              className={`flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 ${
+                viewport === v
+                  ? 'bg-violet-600 text-white shadow-sm shadow-violet-900/50'
+                  : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700'
               }`}
             >
               {VIEWPORTS[v].icon}
@@ -50,26 +53,22 @@ export function PreviewPanel({ port, phase, isRestarting = false, refreshTick = 
           ))}
         </div>
 
-        {/* URL bar */}
-        <div className="flex-1 bg-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-400 font-mono truncate">
-          {previewUrl ?? 'Preview not ready'}
+        {/* URL bar — same height as switcher */}
+        <div className="flex items-center flex-1 h-8 bg-zinc-800 border border-zinc-700/60 rounded-lg px-3 gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-zinc-600 shrink-0" />
+          <span className="text-xs text-zinc-400 font-mono truncate">
+            {previewUrl ?? 'Preview not ready'}
+          </span>
         </div>
 
-        {/* Reload */}
+        {/* Reload — same height */}
         <button
           onClick={() => setReloadKey((k) => k + 1)}
           disabled={!previewUrl}
           title="Reload preview"
-          className="p-1.5 hover:bg-zinc-800 disabled:opacity-40 rounded-lg transition-colors text-zinc-400"
+          className="flex items-center justify-center w-8 h-8 bg-zinc-800 border border-zinc-700/60 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-            />
-          </svg>
+          <HiRefresh size={16} />
         </button>
       </div>
 
