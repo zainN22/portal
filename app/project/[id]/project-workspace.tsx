@@ -31,12 +31,8 @@ export function ProjectWorkspace({ id }: { id: string }) {
   const [projectName, setProjectName] = useState('Your app')
 
   // ── Build queue (layout → each page → backend) ──────────────────────────────
-  // Populated after generate-specs completes; each approval pops the first item.
   const [buildQueue, setBuildQueue] = useState<string[]>([])
-  // ref keeps the approve handler closure always current without re-creating it
   const buildQueueRef = useRef<string[]>([])
-  // When true, preview-ready / done events do NOT transition out of GenerationScreen.
-  // This keeps the generation overlay up during the initial specs → scaffold → layout → first-page pipeline.
   const suppressPreviewRef = useRef(false)
 
   // GenerationScreen progress
@@ -54,97 +50,31 @@ export function ProjectWorkspace({ id }: { id: string }) {
   const [panelWidth, setPanelWidth] = useState(420)
   const [dragging, setDragging] = useState(false)
 
-  useEffect(() => {
-    // Guard against stale async work. Because the parent passes key={id},
-    // React unmounts this component on navigation — but the cleanup still
-    // fires, aborting any in-flight fetches cleanly.
-    let cancelled = false
-    const controller = new AbortController()
+  // ── SSE event stream reader ─────────────────────────────────────────────────
+  // Connects to /api/projects/:id/events and processes SSE events.
+  // Returns the payload from the 'done' event, or {} if stream ends without one.
+  const connectToEvents = useCallback(
+    async (fromIndex = 0): Promise<Record<string, unknown>> => {
+      console.log(`[connectToEvents] Connecting to events stream, fromIndex=${fromIndex}`)
 
-    fetch(`/api/projects/${id}`, { signal: controller.signal })
-      .then((r) => r.json())
-      .then(async (p: Project) => {
-        if (cancelled) return
-        setProject(p)
-        setPhase(p.phase)
-        setProjectName(p.name !== 'New Project' ? p.name : 'Your app')
+      const res = await fetch(`/api/projects/${id}/events?fromIndex=${fromIndex}`)
+      console.log(`[connectToEvents] Response status: ${res.status}, body: ${!!res.body}`)
 
-        // For projects that already have a live preview, restart the dev server
-        // so the iframe always points to THIS project's server — not a recycled
-        // port that was used by a different project before the portal restarted.
-        if (p.phase === 'preview' || p.phase === 'complete') {
-          setPreviewLoading(true)
-          try {
-            const res = await fetch(`/api/projects/${id}/preview`, {
-              method: 'POST',
-              signal: controller.signal,
-            })
-            if (cancelled) return
-            if (res.ok) {
-              const { port } = await res.json()
-              if (!cancelled) setPreviewPort(port)
-            }
-          } catch {
-            // If restart fails or was aborted, show an error state in the preview panel
-          } finally {
-            if (!cancelled) setPreviewLoading(false)
-          }
-        }
-      })
-      .catch(() => {
-        if (!cancelled) router.push('/')
-      })
-
-    return () => {
-      cancelled = true
-      controller.abort()
-    }
-  }, [id, router])
-
-  const handlePreviewRefresh = useCallback(() => {
-    setPreviewRefreshTick((t) => t + 1)
-  }, [])
-
-  const handlePhaseChange = useCallback((p: ProjectPhase) => {
-    setPhase(p)
-    setProject((prev) => (prev ? { ...prev, phase: p } : prev))
-  }, [])
-
-  // ── Core SSE streaming helper ────────────────────────────────────────────────
-  // Streams a single skill session. Returns the payload from the `done` event.
-  const runSkill = useCallback(
-    async (skill: string, pageName?: string): Promise<Record<string, unknown>> => {
-      const phaseMap: Record<string, ProjectPhase> = {
-        'generate-specs': 'writing-specs',
-        'scaffold-frontend': 'building',
-        'build-layout': 'building',
-        'build-page': 'building',
-        'build-backend': 'building-backend',
-      }
-      setPhase(phaseMap[skill] ?? 'building')
-      setProject((prev) => (prev ? { ...prev, phase: phaseMap[skill] ?? 'building' } : prev))
-      setIsBuilding(true)
-
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: id, skill, pageName }),
-      })
-
-      if (!res.body) {
-        setIsBuilding(false)
-        return {}
-      }
+      if (!res.body) return {}
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buf = ''
       let eventName = ''
       let doneData: Record<string, unknown> = {}
+      let eventCount = 0
 
       while (true) {
         const { done, value } = await reader.read()
-        if (done) break
+        if (done) {
+          console.log(`[connectToEvents] Stream ended. Total events: ${eventCount}`)
+          break
+        }
 
         buf += decoder.decode(value, { stream: true })
         const lines = buf.split('\n')
@@ -164,6 +94,12 @@ export function ProjectWorkspace({ id }: { id: string }) {
             continue
           }
 
+          eventCount++
+          if (eventCount <= 5 || eventCount % 10 === 0) {
+            console.log(`[connectToEvents] Event #${eventCount} [${eventName}]:`, JSON.stringify(payload).substring(0, 150))
+          }
+
+          // Map events to UI state
           if (payload.text) setGenEvents((p) => [...p, { kind: 'text', data: payload.text as string }])
           if (payload.path) setGenEvents((p) => [...p, { kind: 'file', data: payload.path as string }])
           if (payload.command) setGenEvents((p) => [...p, { kind: 'shell', data: payload.command as string }])
@@ -179,13 +115,13 @@ export function ProjectWorkspace({ id }: { id: string }) {
           }
 
           if (eventName === 'error' && payload.message) {
+            console.error(`[connectToEvents] ❌ Error: ${payload.message}`)
             setGenEvents((p) => [...p, { kind: 'error', data: payload.message as string }])
           }
 
           if (eventName === 'preview-ready' && payload.port) {
-            // Always save the port so the iframe can connect later
+            console.log(`[connectToEvents] 🖥 Preview ready on port ${payload.port}`)
             setPreviewPort(payload.port as number)
-            // Only transition to preview if we're not in the initial pipeline
             if (!suppressPreviewRef.current) {
               setIsBuilding(false)
               setPhase('preview')
@@ -199,11 +135,10 @@ export function ProjectWorkspace({ id }: { id: string }) {
 
           if (eventName === 'done') {
             doneData = payload
+            console.log(`[connectToEvents] ✅ Done: skill="${payload.skill}"`)
             setGenEvents((p) => [...p, { kind: 'done', data: `${payload.skill} complete` }])
 
             const s = payload.skill as string
-            // build-layout and build-page transition back to preview after done
-            // (unless suppressed during the initial pipeline)
             if (s === 'build-layout' || s === 'build-page') {
               if (!suppressPreviewRef.current) {
                 setIsBuilding(false)
@@ -211,12 +146,21 @@ export function ProjectWorkspace({ id }: { id: string }) {
                 setProject((prev) => (prev ? { ...prev, phase: 'preview' } : prev))
               }
             }
-            // build-backend transitions to complete
             if (s === 'build-backend') {
               setIsBuilding(false)
               setPhase('complete')
               setProject((prev) => (prev ? { ...prev, phase: 'complete' } : prev))
             }
+          }
+
+          // build-complete is sent by the events endpoint when the build finishes
+          if (eventName === 'build-complete') {
+            console.log(`[connectToEvents] Build complete, status: ${payload.status}`)
+          }
+
+          // status event: no active build — just update phase
+          if (eventName === 'status') {
+            console.log(`[connectToEvents] Status: phase="${payload.phase}", message="${payload.message}"`)
           }
 
           eventName = ''
@@ -231,37 +175,199 @@ export function ProjectWorkspace({ id }: { id: string }) {
     [id],
   )
 
+  // ── Core skill runner ────────────────────────────────────────────────────────
+  // 1. POST /api/generate (fire-and-forget — starts background build)
+  // 2. Connect to /api/projects/:id/events (SSE — survives refresh)
+  const runSkill = useCallback(
+    async (skill: string, pageName?: string): Promise<Record<string, unknown>> => {
+      console.log(`[runSkill] ▶ Starting skill: "${skill}"`, pageName ? `page: "${pageName}"` : '')
+      const phaseMap: Record<string, ProjectPhase> = {
+        'generate-specs': 'writing-specs',
+        'scaffold-frontend': 'building',
+        'build-layout': 'building',
+        'build-page': 'building',
+        'build-backend': 'building-backend',
+      }
+      setPhase(phaseMap[skill] ?? 'building')
+      setProject((prev) => (prev ? { ...prev, phase: phaseMap[skill] ?? 'building' } : prev))
+      setIsBuilding(true)
+
+      // Step 1: Fire-and-forget — start the build in the background
+      console.log(`[runSkill] POST /api/generate (fire-and-forget)`)
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: id, skill, pageName }),
+      })
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Unknown error' }))
+        console.error(`[runSkill] Failed to start build:`, err)
+        setIsBuilding(false)
+        return {}
+      }
+
+      console.log(`[runSkill] Build started, connecting to events stream...`)
+
+      // Step 2: Connect to events SSE to receive updates
+      // Small delay to let the build runner push its first event
+      await new Promise((r) => setTimeout(r, 300))
+      const doneData = await connectToEvents(0)
+
+      console.log(`[runSkill] ◼ Finished "${skill}".`)
+      return doneData
+    },
+    [id, connectToEvents],
+  )
+
+  // ── Load project on mount ───────────────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false
+    const controller = new AbortController()
+
+    console.log('[ProjectWorkspace] Mounting — fetching project', id)
+
+    fetch(`/api/projects/${id}`, { signal: controller.signal })
+      .then((r) => r.json())
+      .then(async (p: Project) => {
+        if (cancelled) return
+        console.log('[ProjectWorkspace] Project loaded:', {
+          id: p.id, name: p.name, phase: p.phase, dir: p.dir, previewPort: p.previewPort,
+        })
+
+        setProject(p)
+        setPhase(p.phase)
+        setProjectName(p.name !== 'New Project' ? p.name : 'Your app')
+
+        // ── RECONNECT: If project is in a building phase, reconnect to events stream.
+        // The build is running in the background — we just need to re-attach.
+        if (GENERATING_PHASES.includes(p.phase)) {
+          console.log('[ProjectWorkspace] 🔄 Building phase detected on load — reconnecting to events stream')
+          setIsBuilding(true)
+          setPhaseLabel('Reconnecting to build...')
+          setGenEvents([{ kind: 'phase', data: 'Reconnecting to build...' }])
+
+          try {
+            // Connect to the events endpoint — it will send all buffered events first
+            await connectToEvents(0)
+          } catch (err) {
+            console.error('[ProjectWorkspace] Events stream error:', err)
+          }
+
+          // After events stream ends, reload project to get latest state
+          if (cancelled) return
+          try {
+            const refreshRes = await fetch(`/api/projects/${id}`, { signal: controller.signal })
+            if (refreshRes.ok) {
+              const updated: Project = await refreshRes.json()
+              console.log('[ProjectWorkspace] Post-build project state:', updated.phase)
+              setProject(updated)
+              setPhase(updated.phase)
+              setIsBuilding(false)
+
+              if ((updated.phase === 'preview' || updated.phase === 'complete')) {
+                setPreviewLoading(true)
+                try {
+                  const previewRes = await fetch(`/api/projects/${id}/preview`, {
+                    method: 'POST', signal: controller.signal,
+                  })
+                  if (previewRes.ok && !cancelled) {
+                    const { port } = await previewRes.json()
+                    console.log('[ProjectWorkspace] Preview on port', port)
+                    setPreviewPort(port)
+                  }
+                } catch (err) {
+                  console.error('[ProjectWorkspace] Preview restart error:', err)
+                } finally {
+                  if (!cancelled) setPreviewLoading(false)
+                }
+              }
+            }
+          } catch {
+            // ignore
+          }
+          return
+        }
+
+        // For projects with a live preview, restart the dev server
+        if (p.phase === 'preview' || p.phase === 'complete') {
+          console.log('[ProjectWorkspace] Phase is', p.phase, '— restarting preview server')
+          setPreviewLoading(true)
+          try {
+            const res = await fetch(`/api/projects/${id}/preview`, {
+              method: 'POST', signal: controller.signal,
+            })
+            if (cancelled) return
+            if (res.ok) {
+              const { port } = await res.json()
+              console.log('[ProjectWorkspace] Preview server started on port', port)
+              if (!cancelled) setPreviewPort(port)
+            }
+          } catch (err) {
+            console.error('[ProjectWorkspace] Preview restart error:', err)
+          } finally {
+            if (!cancelled) setPreviewLoading(false)
+          }
+        }
+      })
+      .catch((err) => {
+        console.error('[ProjectWorkspace] Failed to load project:', err)
+        if (!cancelled) router.push('/')
+      })
+
+    return () => {
+      console.log('[ProjectWorkspace] Unmounting — aborting fetches for', id)
+      cancelled = true
+      controller.abort()
+    }
+  }, [id, router, connectToEvents])
+
+  const handlePreviewRefresh = useCallback(() => {
+    setPreviewRefreshTick((t) => t + 1)
+  }, [])
+
+  const handlePhaseChange = useCallback((p: ProjectPhase) => {
+    console.log('[ProjectWorkspace] Phase change:', p)
+    setPhase(p)
+    setProject((prev) => (prev ? { ...prev, phase: p } : prev))
+  }, [])
+
   // ── Initial pipeline: specs → scaffold → layout → first page ─────────────────
-  // Keeps the GenerationScreen up until there is real content to preview.
   const handleProceed = useCallback(
     async (_dirPath: string, name: string, _overviewContent: string) => {
+      console.log('[handleProceed] ▶ Starting full build pipeline for:', name)
       setProjectName(name)
       setGenEvents([])
       setPhaseLabel('')
 
-      // Suppress all preview transitions so the generation overlay stays up
-      // through the entire initial pipeline.
       suppressPreviewRef.current = true
 
-      // Step 1: write all spec files
-      setStepInfo(null) // no total yet
+      // Step 1: generate specs
+      console.log('[handleProceed] Step 1: generate-specs')
+      setStepInfo(null)
       const specsDone = await runSkill('generate-specs')
+      console.log('[handleProceed] generate-specs done. Result:', specsDone)
 
       // Build the approval queue from discovered pages
       const pages = Array.isArray(specsDone.pages) ? (specsDone.pages as string[]) : ['home']
       const queue = ['build-layout', ...pages.map((p) => `page-${p}`), 'build-backend']
+      console.log('[handleProceed] Build queue:', queue)
       buildQueueRef.current = queue
       setBuildQueue(queue)
 
-      // Total build steps: scaffold + queue items
       const total = 1 + queue.length
       setStepInfo({ current: 1, total })
 
-      // Step 2: scaffold and start the dev server (port saved, preview still hidden)
+      // Step 2: scaffold
+      console.log('[handleProceed] Step 2: scaffold-frontend')
+      setGenEvents([])
+      setPhaseLabel('')
       await runSkill('scaffold-frontend')
+      console.log('[handleProceed] scaffold-frontend done')
 
-      // Step 3: auto-run build-layout
+      // Step 3: build layout
       if (buildQueueRef.current.length > 0 && buildQueueRef.current[0] === 'build-layout') {
+        console.log('[handleProceed] Step 3: build-layout')
         const [, ...afterLayout] = buildQueueRef.current
         buildQueueRef.current = afterLayout
         setBuildQueue(afterLayout)
@@ -269,20 +375,24 @@ export function ProjectWorkspace({ id }: { id: string }) {
         setGenEvents([])
         setPhaseLabel('')
         await runSkill('build-layout')
+        console.log('[handleProceed] build-layout done')
       }
 
-      // Step 4: auto-run the first page so the preview has real content
+      // Step 4: first page
       if (buildQueueRef.current.length > 0 && buildQueueRef.current[0].startsWith('page-')) {
         const [firstPage, ...rest] = buildQueueRef.current
+        console.log('[handleProceed] Step 4: build-page', firstPage)
         buildQueueRef.current = rest
         setBuildQueue(rest)
         setStepInfo({ current: 3, total })
         setGenEvents([])
         setPhaseLabel('')
         await runSkill('build-page', firstPage.replace(/^page-/, ''))
+        console.log('[handleProceed] build-page done for', firstPage)
       }
 
-      // Pipeline done — reveal the preview with actual content
+      // Pipeline done — reveal preview
+      console.log('[handleProceed] ✅ Full pipeline complete — revealing preview')
       suppressPreviewRef.current = false
       setIsBuilding(false)
       setPhase('preview')
@@ -300,7 +410,6 @@ export function ProjectWorkspace({ id }: { id: string }) {
     buildQueueRef.current = rest
     setBuildQueue(rest)
 
-    // Advance step counter (scaffold was step 1, so layout is 2, etc.)
     setStepInfo((prev) => prev ? { current: prev.current + 1, total: prev.total } : null)
     setGenEvents([])
     setPhaseLabel('')
