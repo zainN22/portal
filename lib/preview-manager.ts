@@ -1,6 +1,10 @@
 /**
- * Manages one Vite/Next dev server subprocess per project.
+ * Manages one dev-server subprocess per project.
  * The portal embeds the running server in an iframe.
+ *
+ * The processes Map stores { proc, port } so startPreview can check whether
+ * the existing server is still alive before killing and restarting it.
+ * This makes startPreview idempotent: safe to call when reopening a project page.
  */
 
 import { execa } from 'execa'
@@ -8,38 +12,60 @@ import path from 'path'
 import net from 'net'
 import { setPreviewPort } from './project-manager'
 
-// projectId → running subprocess
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const processes = new Map<string, any>()
+interface RunningPreview {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  proc: any
+  port: number
+}
+
+// projectId → running subprocess + port
+const processes = new Map<string, RunningPreview>()
 
 const PORT_RANGE_START = 3100
 
+/**
+ * Start (or reuse) the dev server for a project.
+ *
+ * If the server is already tracked AND the port is responding, return the
+ * existing port immediately — no restart.  This makes the function safe to
+ * call both from the build pipeline and from the "reopen project" path.
+ */
 export async function startPreview(projectId: string, projectDir: string): Promise<number> {
-  // Stop any existing preview for this project
+  // ── Reuse existing server if it is still alive ─────────────────────────────
+  const existing = processes.get(projectId)
+  if (existing && (await isPortAlive(existing.port))) {
+    return existing.port
+  }
+
+  // ── Stop any stale tracked process ─────────────────────────────────────────
   await stopPreview(projectId)
 
   const clientDir = path.join(projectDir, 'client')
   const port = await findFreePort(PORT_RANGE_START)
 
-  const proc = execa('npm', ['run', 'dev', '--', '--port', String(port), '--hostname', '0.0.0.0'], {
-    cwd: clientDir,
-    env: { ...process.env, BROWSER: 'none', FORCE_COLOR: '0' },
-    reject: false,
-  })
+  const proc = execa(
+    'npm',
+    ['run', 'dev', '--', '--port', String(port), '--hostname', '0.0.0.0'],
+    {
+      cwd: clientDir,
+      env: { ...process.env, BROWSER: 'none', FORCE_COLOR: '0' },
+      reject: false,
+    },
+  )
 
-  processes.set(projectId, proc)
+  processes.set(projectId, { proc, port })
 
-  // Wait for the port to be open (max 30s)
-  await waitForPort(port, 30_000)
+  // Wait for the port to be open (max 60 s — first run after npm install can be slow)
+  await waitForPort(port, 60_000)
 
   setPreviewPort(projectId, port)
   return port
 }
 
 export async function stopPreview(projectId: string): Promise<void> {
-  const proc = processes.get(projectId)
-  if (proc) {
-    proc.kill('SIGTERM')
+  const entry = processes.get(projectId)
+  if (entry) {
+    entry.proc.kill('SIGTERM')
     processes.delete(projectId)
   }
 }
@@ -62,6 +88,15 @@ function isPortFree(port: number): Promise<boolean> {
   })
 }
 
+/** Quick liveness check — resolves true if anything is listening on the port. */
+function isPortAlive(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const sock = net.createConnection(port, '127.0.0.1')
+    sock.once('connect', () => { sock.destroy(); resolve(true) })
+    sock.once('error', () => { sock.destroy(); resolve(false) })
+  })
+}
+
 function waitForPort(port: number, timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const deadline = Date.now() + timeoutMs
@@ -71,14 +106,8 @@ function waitForPort(port: number, timeoutMs: number): Promise<void> {
         return
       }
       const sock = net.createConnection(port, '127.0.0.1')
-      sock.once('connect', () => {
-        sock.destroy()
-        resolve()
-      })
-      sock.once('error', () => {
-        sock.destroy()
-        setTimeout(attempt, 500)
-      })
+      sock.once('connect', () => { sock.destroy(); resolve() })
+      sock.once('error', () => { sock.destroy(); setTimeout(attempt, 500) })
     }
     attempt()
   })

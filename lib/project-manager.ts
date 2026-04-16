@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
-import { createProject, getProject, updateProject } from './db'
+import { createProject, getProject, updateProject, evictPreviewPort } from './db'
 import { writeSkillFiles } from './skill-writer'
 import type { Project } from '@/types'
 
@@ -79,7 +79,16 @@ export function setPhase(id: string, phase: Project['phase']): void {
 }
 
 export function setPreviewPort(id: string, port: number): void {
+  // Evict this port number from any other project row first.
+  // Port numbers are reused when the portal restarts, so without this a second
+  // project can end up pointing to the same port as a previous one.
+  evictPreviewPort(port, id)
   updateProject(id, { previewPort: port })
+}
+
+/** Called when a new build starts so the stale port is never shown on page reload. */
+export function clearPreviewPort(id: string): void {
+  updateProject(id, { previewPort: null })
 }
 
 /**

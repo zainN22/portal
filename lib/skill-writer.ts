@@ -4,15 +4,25 @@
  * that tell Claude Code how to write specs and generate code.
  *
  * Build pipeline (each step is its own Claude Code session):
- *   generate-specs  → writes all spec files + CLAUDE.md
- *   scaffold-frontend → creates Next.js app, tokens, .env, .gitignore
- *   build-layout    → Navbar, Footer, root layout only
- *   build-page      → one page per session (page name injected at call time)
- *   build-backend   → full backend + wires frontend
- *   apply-change    → targeted edits for user requests
+ *   generate-specs     → writes all spec files + CLAUDE.md + dependencies.md
+ *   scaffold-frontend  → copies/creates Next.js app, installs all deps at once, applies tokens
+ *   build-layout       → Navbar, Footer, root layout only
+ *   build-page         → one page per session (page name injected at call time)
+ *   build-backend      → full backend + wires frontend
+ *   apply-change       → targeted edits for user requests
  *
  * Context handoff: each session writes documentation/{phase}.md so the
  * next session reads that summary instead of scanning source files.
+ *
+ * Speed notes:
+ *  - Verification uses `npx tsc --noEmit` (type-check only, ~5-10 s) instead of
+ *    `npm run build` (full Next.js production bundle, 30-90 s).  The dev server
+ *    handles compilation continuously; the type check is sufficient.
+ *  - All `npm install` commands use a shared cache at ~/.webbuilder/npm-cache so
+ *    packages downloaded once are reused across projects.
+ *  - The generate-specs session writes client/specs/dependencies.md so the
+ *    scaffold session can install ALL third-party packages in a single pass
+ *    rather than discovering them piecemeal mid-session.
  */
 
 import fs from 'fs'
@@ -67,7 +77,8 @@ Summarise the project in one sentence before continuing.
 
 ## Step 2 — Decide which spec files this project needs
 
-There is NO fixed list. Reason from the overview:
+There is NO fixed list. Reason from the overview and write ONLY what this project
+actually requires. Do not write placeholder or "we might need this" files.
 
 **Frontend (if any):**
 - Always: \`client/specs/overview.md\` — stack, folder structure, conventions
@@ -101,7 +112,29 @@ Write specs specific to THIS project:
 - Describe actual UI components needed
 - Be thorough — the spec is the blueprint for the entire codebase
 
-## Step 4 — Write CLAUDE.md last
+## Step 4 — Write client/specs/dependencies.md
+
+This file tells the scaffold session exactly which packages to install in one pass.
+List ONLY packages that are NOT already included by create-next-app
+(next, react, react-dom, tailwindcss, @types/node, @types/react, typescript are pre-installed).
+
+Format:
+\`\`\`markdown
+# Client Dependencies
+
+## Runtime
+- package-name — one-line reason (e.g. framer-motion — page transition animations)
+
+## Dev
+- package-name — one-line reason
+\`\`\`
+
+If no additional packages are needed, write the file with just the heading and
+"No additional packages required."
+
+If the project has a backend, also write \`server/specs/dependencies.md\` in the same format.
+
+## Step 5 — Write CLAUDE.md last
 
 CLAUDE.md must:
 1. State the role: "You are building {app name}"
@@ -117,57 +150,103 @@ Use \`.claude/examples/CLAUDE.md\` as a format reference.
 
 const SCAFFOLD_FRONTEND_SKILL = `# scaffold-frontend
 
-You are setting up the initial Next.js project scaffold. Your ONLY job this session is to
-create the project, install dependencies, apply global tokens, and create env/gitignore files.
-Do NOT build any components or pages.
+You are setting up the initial frontend project scaffold. Your ONLY job this session is to
+create the project structure, install ALL dependencies, apply global tokens, and write config
+files. Do NOT build any components or pages yet.
 
-## Step 1 — Read context
+## Step 1 — Read context and detect the tech stack
 Read \`overview.md\`, then \`CLAUDE.md\`, then \`client/specs/overview.md\`.
-Summarise the stack and key conventions in one sentence before continuing.
+The Tech Stack section of overview.md is authoritative. Extract:
+- The frontend framework (e.g. Next.js, Vite + React, Vite + Vue, SvelteKit, etc.)
+- Whether TypeScript is required
+- Whether Tailwind CSS is used
+Summarise the detected stack in one sentence before continuing.
 
-## Step 2 — Scaffold
-Check if \`client/package.json\` exists. If not, run:
-\`\`\`
-npx create-next-app@latest client --typescript --tailwind --app --no-git --no-eslint --yes
-\`\`\`
-Wait for it to finish completely before proceeding.
+## Step 2 — Scaffold the project (skip if already done)
+Check if \`client/package.json\` already exists. If it does, skip to Step 3.
 
-## Step 3 — Apply design tokens
+Otherwise run the appropriate scaffold command based on the detected stack:
+
+**Next.js (TypeScript + Tailwind — the default):**
+\`\`\`
+npx --yes create-next-app@latest client --typescript --tailwind --app --no-git --no-eslint --yes
+\`\`\`
+
+**Vite + React + TypeScript:**
+\`\`\`
+npx --yes create-vite@latest client --template react-ts
+cd client && npm install --cache ~/.webbuilder/npm-cache
+\`\`\`
+
+**Vite + Vue + TypeScript:**
+\`\`\`
+npx --yes create-vite@latest client --template vue-ts
+cd client && npm install --cache ~/.webbuilder/npm-cache
+\`\`\`
+
+**SvelteKit:**
+\`\`\`
+npx --yes sv create client --template minimal --types ts --no-add-ons
+cd client && npm install --cache ~/.webbuilder/npm-cache
+\`\`\`
+
+**Other framework:** Read the spec carefully and run the standard scaffold command for that
+framework. Always prefer an official CLI tool (create-*, degit, etc.) over manual setup.
+
+Wait for the scaffold command to finish completely before proceeding.
+
+## Step 3 — Install Tailwind CSS (if needed and not already included)
+If the stack uses Tailwind and the scaffold did not include it, install and configure it now
+following the official guide for the detected framework.
+
+## Step 4 — Install all project-specific dependencies in one pass
+Read \`client/specs/dependencies.md\`.
+Extract every package listed under Runtime and Dev sections.
+If there are Runtime packages:
+\`\`\`
+cd client && npm install <packages> --cache ~/.webbuilder/npm-cache
+\`\`\`
+If there are Dev packages:
+\`\`\`
+cd client && npm install -D <packages> --cache ~/.webbuilder/npm-cache
+\`\`\`
+If the file says "No additional packages required", skip this step.
+**Never run npm install again in any later session — all packages are installed here.**
+
+## Step 5 — Apply design tokens
 Read \`client/specs/design/tokens.md\`.
-- Define all colour, typography, and spacing values as CSS custom properties in \`client/src/app/globals.css\`
-- Remove all default Next.js boilerplate styles (keep only the :root token block and base resets)
-- Apply the project font via next/font in \`client/src/app/layout.tsx\`
+Write all colour, typography, and spacing values as CSS custom properties in the global
+stylesheet (globals.css for Next.js, index.css or App.css for Vite, etc.).
+Remove default framework boilerplate styles; keep only the :root token block and base resets.
+Apply the project font where the framework expects it (layout.tsx, App.tsx, etc.).
 
-## Step 4 — Create environment and gitignore files
+## Step 6 — Create environment and gitignore files
 - Write \`client/.env.example\` with placeholder values for every env var the project will need
-  (derive these from the specs — API URLs, keys, feature flags, etc.)
-- Write \`client/.env\` with the same keys set to empty strings (never commit real secrets)
-- Write \`client/.gitignore\`:
-  node_modules/
-  .next/
-  out/
-  .env
-  .env.local
-  .DS_Store
+- Write \`client/.env\` with the same keys set to empty strings
+- Write \`client/.gitignore\` appropriate for the framework (node_modules/, build output, .env)
 
-## Step 5 — Verify
-Run: \`cd client && npm run build\`
-Fix all TypeScript and build errors. The build MUST pass before continuing.
+## Step 7 — Verify (type-check only)
+Run: \`cd client && npx tsc --noEmit\`
+Fix all TypeScript errors before continuing.
+(The dev server handles compilation continuously — no need to run a full production build here.)
 
-## Step 6 — Write handoff documentation
-Write \`documentation/scaffold.md\` with the following sections:
+## Step 8 — Write handoff documentation
+Write \`documentation/scaffold.md\` with:
+
+### Stack
+Framework, version, key packages.
 
 ### Packages installed
-List every dependency and devDependency (name + version from package.json).
+Every dependency and devDependency (name + version from package.json).
 
 ### CSS token variables
-List every CSS custom property defined in globals.css (e.g. --color-primary: #FF6B2C).
+Every CSS custom property defined in the global stylesheet.
 
 ### Folder structure
-Show the directory tree created under client/ (exclude node_modules and .next).
+Directory tree under client/ (exclude node_modules and build output).
 
 ### Conventions
-Note any important conventions established (font loading approach, any path aliases, etc.).
+Font loading approach, path aliases, important config decisions.
 
 Then STOP. Write nothing else.
 `
@@ -187,19 +266,20 @@ Read these files in order — this is all the context you need:
 4. \`CLAUDE.md\` — project rules and stack
 
 ## Step 2 — Build layout components
-Build ONLY these three files:
-- \`client/src/components/layout/Navbar.tsx\`
-- \`client/src/components/layout/Footer.tsx\`
-- \`client/src/app/layout.tsx\` (imports Navbar + Footer, wraps {children})
+Read \`documentation/scaffold.md\` to confirm the framework and folder conventions.
+Build ONLY the shared shell — Navbar, Footer, and the root layout wrapper.
+Place them where the framework expects shared layout code (e.g. for Next.js:
+\`client/src/components/layout/\` + \`client/src/app/layout.tsx\`; for Vite+React:
+\`client/src/components/layout/\` + \`client/src/App.tsx\`).
 
 Rules:
-- Use CSS custom properties from globals.css — never hardcode colours or spacing
-- Use fonts from the root layout, not re-imported per-component
+- Use CSS custom properties defined in the global stylesheet — never hardcode colours or spacing
 - Keep Navbar and Footer purely presentational — no data fetching
+- Do NOT run npm install — all packages were installed during scaffold
 
-## Step 3 — Verify
-Run: \`cd client && npm run build\`
-Fix all errors. Build MUST pass before continuing.
+## Step 3 — Verify (type-check only)
+Run: \`cd client && npx tsc --noEmit\`
+Fix all TypeScript errors before continuing.
 
 ## Step 4 — Write handoff documentation
 Write \`documentation/layout.md\` with:
@@ -233,15 +313,18 @@ Read these files in order:
 Do NOT read any other source files. The documentation above contains all the context you need.
 
 ## Step 2 — Build the page
+Read \`documentation/scaffold.md\` to confirm the framework routing conventions.
 - Section components go in \`client/src/components/sections/\`
-- The page file goes in \`client/src/app/{route}/page.tsx\`
+- Place the page file where the framework expects it (e.g. for Next.js:
+  \`client/src/app/{route}/page.tsx\`; for Vite: \`client/src/pages/{Route}.tsx\` wired via the router)
 - Reuse layout components from \`documentation/layout.md\` — do not recreate them
-- Use CSS custom properties from globals.css — never hardcode colours
+- Use CSS custom properties from the global stylesheet — never hardcode colours
 - All copy must come from the spec — no placeholder text
+- Do NOT run npm install — all packages were installed during scaffold
 
-## Step 3 — Verify
-Run: \`cd client && npm run build\`
-Fix all errors. Build MUST pass before continuing.
+## Step 3 — Verify (type-check only)
+Run: \`cd client && npx tsc --noEmit\`
+Fix all TypeScript errors before continuing.
 
 ## Step 4 — Update handoff documentation
 Append to \`documentation/pages.md\` (create if it does not exist):
@@ -271,6 +354,11 @@ frontend expects.
 Check if \`server/package.json\` exists. If not, scaffold based on the stack in
 \`server/specs/overview.md\`. Place all source code under \`server/src/\`.
 
+Install server dependencies:
+\`\`\`
+cd server && npm install <packages from server/specs/dependencies.md> --cache ~/.webbuilder/npm-cache
+\`\`\`
+
 Create:
 - \`server/.env.example\` with all required env var keys
 - \`server/.env\` with keys set to empty strings
@@ -291,7 +379,8 @@ Update the frontend to call real API endpoints:
 - Add \`NEXT_PUBLIC_API_URL\` to \`client/.env\` and \`client/.env.example\`
 
 ## Step 5 — Verify both builds
-Run \`cd client && npm run build\`, then verify the server compiles (\`cd server && npm run build\` or \`tsc --noEmit\`).
+Run \`cd client && npx tsc --noEmit\`, then verify the server compiles
+(\`cd server && npx tsc --noEmit\` or \`npm run build\` per the spec).
 Fix all errors before stopping.
 
 ## Step 6 — Write handoff documentation
@@ -325,14 +414,16 @@ to understand what exists. Only open source files you actually need to edit.
 **New feature or section**:
 - Update or add to the relevant spec file
 - Write the code
+- If a new npm package is needed, install it:
+  \`cd client && npm install <package> --cache ~/.webbuilder/npm-cache\`
 
 **Structural/layout change**:
 - Update the relevant page spec
 - Update the code
 
 ## Step 3 — Verify
-Run: \`cd client && npm run build\`
-Fix any errors introduced by your change.
+Run: \`cd client && npx tsc --noEmit\`
+Fix any TypeScript errors introduced by your change.
 
 ## Rules
 - Make the MINIMAL change needed. Do not refactor unrelated code.

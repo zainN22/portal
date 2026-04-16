@@ -53,9 +53,22 @@ export function getProject(id: string): Project | null {
   return row ? rowToProject(row) : null
 }
 
-export function listProjects(): Project[] {
-  const rows = db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all() as Record<string, unknown>[]
+export function listProjects(limit = 5): Project[] {
+  const rows = db
+    .prepare('SELECT * FROM projects ORDER BY created_at DESC LIMIT ?')
+    .all(limit) as Record<string, unknown>[]
   return rows.map(rowToProject)
+}
+
+/**
+ * Before storing a preview port for a project, null it out on every OTHER project
+ * that currently holds the same number. Port numbers are reused across portal restarts
+ * so without this two separate projects end up pointing to the same dev server.
+ */
+export function evictPreviewPort(port: number, keepId: string): void {
+  db.prepare(
+    'UPDATE projects SET preview_port = NULL WHERE preview_port = ? AND id != ?'
+  ).run(port, keepId)
 }
 
 export function updateProject(id: string, updates: Partial<Project>): void {
