@@ -33,7 +33,7 @@ export function PreviewPanel({ port, phase, isRestarting = false, refreshTick = 
   return (
     <div className="flex flex-col h-full bg-zinc-900">
       {/* Toolbar */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 shrink-0">
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-800 shrink-0">
 
         {/* Viewport switcher — same height as URL bar */}
         <div className="flex items-center gap-0.5 bg-zinc-800 border border-zinc-700/60 rounded-lg p-0.5 h-8">
