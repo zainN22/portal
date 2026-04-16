@@ -40,6 +40,7 @@ export function ChatPanel({
   const [settingUp, setSettingUp] = useState(false)
 
   const bottomRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
 
   // Load persisted messages on mount; fall back to greeting for new projects
   useEffect(() => {
@@ -168,6 +169,7 @@ export function ChatPanel({
     } finally {
       setStreaming(false)
       setStreamingText('')
+      setTimeout(() => inputRef.current?.focus(), 0)
     }
   }, [input, messages, streaming, project.id, onPhaseChange, persistMessages])
 
@@ -234,6 +236,7 @@ export function ChatPanel({
       }
     } finally {
       setStreaming(false)
+      setTimeout(() => inputRef.current?.focus(), 0)
     }
   }, [input, streaming, project.id, onPreviewRefresh, persistMessages])
 
@@ -396,6 +399,7 @@ export function ChatPanel({
         <div className="px-4 py-3 border-t border-zinc-800 shrink-0">
           <div className="flex items-end gap-2 bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 focus-within:border-violet-500 transition-colors">
             <textarea
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
