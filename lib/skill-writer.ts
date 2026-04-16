@@ -169,7 +169,7 @@ Otherwise run the appropriate scaffold command based on the detected stack:
 
 **Next.js (TypeScript + Tailwind — the default):**
 \`\`\`
-npx --yes create-next-app@latest client --typescript --tailwind --app --no-git --no-eslint --yes
+npx --yes create-next-app@latest client --typescript --tailwind --app --src-dir --no-git --no-eslint --yes
 \`\`\`
 
 **Vite + React + TypeScript:**
