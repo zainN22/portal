@@ -7,12 +7,21 @@ import type { ChatMessage, Project, ProjectPhase } from '@/types'
 interface Props {
   project: Project
   phase: ProjectPhase
-  isPipelineRunning?: boolean
+  /** Label of the next build step — shown on the Approve button. Undefined when queue is empty. */
+  nextStepLabel?: string
   onPhaseChange: (phase: ProjectPhase) => void
   onProceed: (dirPath: string, projectName: string, overviewContent: string) => void
+  onApprove: () => void
 }
 
-export function ChatPanel({ project, phase, isPipelineRunning = false, onPhaseChange, onProceed }: Props) {
+export function ChatPanel({
+  project,
+  phase,
+  nextStepLabel,
+  onPhaseChange,
+  onProceed,
+  onApprove,
+}: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
@@ -32,17 +41,20 @@ export function ChatPanel({ project, phase, isPipelineRunning = false, onPhaseCh
 
   // Greeting on mount
   useEffect(() => {
-    setMessages([{
-      role: 'assistant',
-      content: "Hi! I'm here to help you build your web app. Tell me — what are you looking to create? It can be anything: a SaaS tool, a marketplace, a portfolio, whatever's on your mind.",
-    }])
+    setMessages([
+      {
+        role: 'assistant',
+        content:
+          "Hi! I'm here to help you build your web app. Tell me — what are you looking to create? It can be anything: a SaaS tool, a marketplace, a portfolio, whatever's on your mind.",
+      },
+    ])
   }, [])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, streamingText, isReady])
 
-  // ── Send a chat message to the gathering agent ───────────────────────────────
+  // ── Send a chat message to the gathering agent ────────────────────────────────
 
   const sendMessage = useCallback(async () => {
     if (!input.trim() || streaming) return
@@ -78,11 +90,18 @@ export function ChatPanel({ project, phase, isPipelineRunning = false, onPhaseCh
         buf = lines.pop() ?? ''
 
         for (const line of lines) {
-          if (line.startsWith('event: ')) { eventName = line.slice(7).trim(); continue }
+          if (line.startsWith('event: ')) {
+            eventName = line.slice(7).trim()
+            continue
+          }
           if (!line.startsWith('data: ')) continue
 
           let payload: Record<string, unknown>
-          try { payload = JSON.parse(line.slice(6)) } catch { continue }
+          try {
+            payload = JSON.parse(line.slice(6))
+          } catch {
+            continue
+          }
 
           if (eventName === 'delta' && typeof payload.text === 'string') {
             accumulated += payload.text
@@ -153,7 +172,9 @@ export function ChatPanel({ project, phase, isPipelineRunning = false, onPhaseCh
           try {
             const p = JSON.parse(line.slice(6))
             if (p.text) summary += p.text as string
-          } catch { /* ignore */ }
+          } catch {
+            /* ignore */
+          }
         }
       }
 
@@ -163,11 +184,17 @@ export function ChatPanel({ project, phase, isPipelineRunning = false, onPhaseCh
     }
   }, [input, streaming, project.id])
 
-  // ── Directory + name submit → hand off to parent ─────────────────────────────
+  // ── Directory + name submit → hand off to parent ──────────────────────────────
 
   const handleSetup = async () => {
-    if (!projectName.trim()) { setDirError('Please enter a project name'); return }
-    if (!dirPath.trim()) { setDirError('Please enter a folder path'); return }
+    if (!projectName.trim()) {
+      setDirError('Please enter a project name')
+      return
+    }
+    if (!dirPath.trim()) {
+      setDirError('Please enter a folder path')
+      return
+    }
     setDirError('')
     setSettingUp(true)
 
@@ -175,7 +202,11 @@ export function ChatPanel({ project, phase, isPipelineRunning = false, onPhaseCh
       const res = await fetch(`/api/projects/${project.id}/setup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dirPath: dirPath.trim(), projectName: projectName.trim(), overviewContent }),
+        body: JSON.stringify({
+          dirPath: dirPath.trim(),
+          projectName: projectName.trim(),
+          overviewContent,
+        }),
       })
 
       if (!res.ok) {
@@ -199,9 +230,10 @@ export function ChatPanel({ project, phase, isPipelineRunning = false, onPhaseCh
   }
 
   const isPreviewPhase = phase === 'preview' || phase === 'complete'
-  // Block editing while the build pipeline is still running (layout/pages sessions)
-  const canEdit = isPreviewPhase && !isPipelineRunning
-  const canChat = (phase === 'gathering' || (phase === 'ready' && !isReady)) || canEdit
+  const canChat = phase === 'gathering' || (phase === 'ready' && !isReady) || isPreviewPhase
+
+  // Whether to show the Approve CTA (only in preview with a next step remaining)
+  const showApprove = phase === 'preview' && !!nextStepLabel
 
   return (
     <div className="flex flex-col h-full bg-zinc-950">
@@ -238,12 +270,18 @@ export function ChatPanel({ project, phase, isPipelineRunning = false, onPhaseCh
               <input
                 type="text"
                 value={projectName}
-                onChange={(e) => { setProjectName(e.target.value); setDirError('') }}
+                onChange={(e) => {
+                  setProjectName(e.target.value)
+                  setDirError('')
+                }}
                 placeholder="my-saas-app"
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 outline-none focus:border-violet-500 transition-colors"
               />
               <p className="text-xs text-zinc-600">
-                Folder will be created as <code className="text-zinc-500">project-{projectName ? projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-') : 'name'}/</code>
+                Folder will be created as{' '}
+                <code className="text-zinc-500">
+                  project-{projectName ? projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-') : 'name'}/
+                </code>
               </p>
             </div>
 
@@ -252,7 +290,10 @@ export function ChatPanel({ project, phase, isPipelineRunning = false, onPhaseCh
               <input
                 type="text"
                 value={dirPath}
-                onChange={(e) => { setDirPath(e.target.value); setDirError('') }}
+                onChange={(e) => {
+                  setDirPath(e.target.value)
+                  setDirError('')
+                }}
                 onKeyDown={(e) => e.key === 'Enter' && handleSetup()}
                 placeholder="/Users/you/projects"
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 font-mono placeholder-zinc-600 outline-none focus:border-violet-500 transition-colors"
@@ -281,13 +322,19 @@ export function ChatPanel({ project, phase, isPipelineRunning = false, onPhaseCh
         <div ref={bottomRef} />
       </div>
 
-      {/* Building status — shown in chat panel while pipeline is finishing */}
-      {isPreviewPhase && isPipelineRunning && (
-        <div className="px-4 py-3 border-t border-zinc-800 shrink-0">
-          <div className="flex items-center gap-2 text-xs text-zinc-500">
-            <div className="w-3 h-3 border-2 border-violet-500 border-t-transparent rounded-full animate-spin shrink-0" />
-            Building remaining pages — edits available once complete
-          </div>
+      {/* ── Approve CTA ─── shown between messages and input when preview is live */}
+      {showApprove && (
+        <div className="px-4 pt-3 pb-1 border-t border-zinc-800 shrink-0 space-y-2">
+          <p className="text-xs text-zinc-500 text-center">
+            Chat to make edits, or approve to continue
+          </p>
+          <button
+            onClick={onApprove}
+            disabled={streaming}
+            className="w-full py-2.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-xl transition-colors"
+          >
+            Approve → {nextStepLabel}
+          </button>
         </div>
       )}
 
@@ -299,13 +346,13 @@ export function ChatPanel({ project, phase, isPipelineRunning = false, onPhaseCh
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={canEdit ? 'Describe a change...' : 'Tell me about your app...'}
+              placeholder={isPreviewPhase ? 'Describe a change...' : 'Tell me about your app...'}
               disabled={streaming}
               rows={1}
               className="flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 resize-none outline-none max-h-32 overflow-y-auto"
             />
             <button
-              onClick={canEdit ? sendEdit : sendMessage}
+              onClick={isPreviewPhase ? sendEdit : sendMessage}
               disabled={!input.trim() || streaming}
               className="p-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors shrink-0"
             >

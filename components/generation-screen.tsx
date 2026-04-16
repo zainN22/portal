@@ -1,36 +1,23 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
-import type { GenerationEvent, ProjectPhase } from '@/types'
+import type { GenerationEvent } from '@/types'
 
 interface Props {
   projectName: string
-  phase: ProjectPhase
+  phaseLabel: string
+  stepInfo?: { current: number; total: number }
   events: GenerationEvent[]
 }
 
-const PHASE_LABEL: Partial<Record<ProjectPhase, string>> = {
-  'writing-specs':    'Writing spec files',
-  'building':         'Building frontend',
-  'building-backend': 'Building backend',
-}
-
-const PHASE_STEP: Partial<Record<ProjectPhase, { current: number; total: number }>> = {
-  'writing-specs':    { current: 1, total: 3 },
-  'building':         { current: 2, total: 3 },
-  'building-backend': { current: 3, total: 3 },
-}
-
-export function GenerationScreen({ projectName, phase, events }: Props) {
+export function GenerationScreen({ projectName, phaseLabel, stepInfo, events }: Props) {
   const logRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' })
   }, [events])
 
-  const label = PHASE_LABEL[phase] ?? 'Working...'
-  const step = PHASE_STEP[phase]
-  const progress = step ? Math.round((step.current / step.total) * 100) : 0
+  const progress = stepInfo ? Math.round((stepInfo.current / stepInfo.total) * 100) : 0
 
   const fileCount = events.filter((e) => e.kind === 'file').length
 
@@ -46,16 +33,18 @@ export function GenerationScreen({ projectName, phase, events }: Props) {
         <div className="text-center space-y-3">
           <div className="flex items-center justify-center gap-3 mb-2">
             <div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
-            <span className="text-zinc-400 text-sm font-medium">{label}...</span>
+            <span className="text-zinc-400 text-sm font-medium">
+              {phaseLabel || 'Working...'}
+            </span>
           </div>
           <h1 className="text-2xl font-bold text-zinc-100">{projectName || 'Your app'}</h1>
-          {step && (
-            <p className="text-zinc-500 text-xs">Step {step.current} of {step.total}</p>
+          {stepInfo && (
+            <p className="text-zinc-500 text-xs">Step {stepInfo.current} of {stepInfo.total}</p>
           )}
         </div>
 
-        {/* Progress bar */}
-        {step && (
+        {/* Progress bar — only when we know total steps */}
+        {stepInfo && (
           <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
             <div
               className="h-full bg-violet-500 rounded-full transition-all duration-700"

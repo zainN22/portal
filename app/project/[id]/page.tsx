@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useEffect, useState, useCallback } from 'react'
+import { use, useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChatPanel } from '@/components/chat-panel'
 import { PreviewPanel } from '@/components/preview-panel'
@@ -11,7 +11,19 @@ interface Props {
   params: Promise<{ id: string }>
 }
 
+// Phases where the full-screen generation loader should show
 const GENERATING_PHASES: ProjectPhase[] = ['writing-specs', 'building', 'building-backend']
+
+/** Human-readable label for an item in the build queue. */
+function queueItemLabel(item: string): string {
+  if (item === 'build-layout') return 'Build layout'
+  if (item === 'build-backend') return 'Build backend'
+  if (item.startsWith('page-')) {
+    const name = item.replace(/^page-/, '')
+    return `Build ${name[0].toUpperCase() + name.slice(1)} page`
+  }
+  return 'Continue'
+}
 
 export default function ProjectPage({ params }: Props) {
   const { id } = use(params)
@@ -23,12 +35,22 @@ export default function ProjectPage({ params }: Props) {
   const [genEvents, setGenEvents] = useState<GenerationEvent[]>([])
   const [projectName, setProjectName] = useState('Your app')
 
-  // Pipeline progress — true while any Claude Code session is still running
-  // after the preview first appears (layout + page sessions)
-  const [isPipelineRunning, setIsPipelineRunning] = useState(false)
-  const [pipelinePhaseLabel, setPipelinePhaseLabel] = useState('')
+  // ── Build queue (layout → each page → backend) ──────────────────────────────
+  // Populated after generate-specs completes; each approval pops the first item.
+  const [buildQueue, setBuildQueue] = useState<string[]>([])
+  // ref keeps the approve handler closure always current without re-creating it
+  const buildQueueRef = useRef<string[]>([])
+
+  // GenerationScreen progress
+  const [isBuilding, setIsBuilding] = useState(false)
+  const [phaseLabel, setPhaseLabel] = useState('')
+  const [stepInfo, setStepInfo] = useState<{ current: number; total: number } | null>(null)
+
   // Incrementing this causes the preview iframe to reload
   const [previewRefreshTick, setPreviewRefreshTick] = useState(0)
+
+  // True while we are (re)starting the dev server for an existing project
+  const [previewLoading, setPreviewLoading] = useState(false)
 
   // Resizable divider
   const [panelWidth, setPanelWidth] = useState(420)
@@ -37,123 +59,221 @@ export default function ProjectPage({ params }: Props) {
   useEffect(() => {
     fetch(`/api/projects/${id}`)
       .then((r) => r.json())
-      .then((p: Project) => {
+      .then(async (p: Project) => {
         setProject(p)
         setPhase(p.phase)
         setProjectName(p.name !== 'New Project' ? p.name : 'Your app')
-        if (p.previewPort) setPreviewPort(p.previewPort)
+
+        // For projects that already have a live preview, restart the dev server
+        // so the iframe always points to THIS project's server — not a recycled
+        // port that was used by a different project before the portal restarted.
+        if (p.phase === 'preview' || p.phase === 'complete') {
+          setPreviewLoading(true)
+          try {
+            const res = await fetch(`/api/projects/${id}/preview`, { method: 'POST' })
+            if (res.ok) {
+              const { port } = await res.json()
+              setPreviewPort(port)
+            }
+          } catch {
+            // If restart fails, show an error state in the preview panel
+          } finally {
+            setPreviewLoading(false)
+          }
+        }
       })
       .catch(() => router.push('/'))
   }, [id, router])
 
   const handlePhaseChange = useCallback((p: ProjectPhase) => {
     setPhase(p)
-    setProject((prev) => prev ? { ...prev, phase: p } : prev)
+    setProject((prev) => (prev ? { ...prev, phase: p } : prev))
   }, [])
 
-  // Called by ChatPanel when user submits path + name and setup succeeds.
-  // Runs both skills back-to-back.
-  const handleProceed = useCallback(async (
-    _dirPath: string,
-    name: string,
-    _overviewContent: string
-  ) => {
-    setProjectName(name)
-    setGenEvents([])
-    setPhase('writing-specs')
-    setProject((prev) => prev ? { ...prev, phase: 'writing-specs' } : prev)
-
-    await runSkill('generate-specs')
-    setIsPipelineRunning(true)
-    try {
-      await runSkill('build-frontend')
-    } finally {
-      setIsPipelineRunning(false)
-      setPipelinePhaseLabel('')
-    }
-  }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const runSkill = async (skill: string) => {
-    const phaseMap: Record<string, ProjectPhase> = {
-      'generate-specs': 'writing-specs',
-      'build-frontend': 'building',
-      'build-backend': 'building-backend',
-    }
-    setPhase(phaseMap[skill] ?? 'building')
-
-    const res = await fetch('/api/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId: id, skill }),
-    })
-
-    if (!res.body) return
-
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buf = ''
-    let eventName = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buf += decoder.decode(value, { stream: true })
-      const lines = buf.split('\n')
-      buf = lines.pop() ?? ''
-
-      for (const line of lines) {
-        if (line.startsWith('event: ')) { eventName = line.slice(7).trim(); continue }
-        if (!line.startsWith('data: ')) continue
-
-        let payload: Record<string, unknown>
-        try { payload = JSON.parse(line.slice(6)) } catch { continue }
-
-        if (payload.text)    setGenEvents((p) => [...p, { kind: 'text',  data: payload.text as string }])
-        if (payload.path)    setGenEvents((p) => [...p, { kind: 'file',  data: payload.path as string }])
-        if (payload.command) setGenEvents((p) => [...p, { kind: 'shell', data: payload.command as string }])
-        if (payload.skill)   setGenEvents((p) => [...p, { kind: 'done',  data: `${payload.skill} complete` }])
-
-        if (eventName === 'phase' && payload.label) {
-          const label = payload.label as string
-          setPipelinePhaseLabel(label)
-          setGenEvents((p) => [...p, { kind: 'phase', data: label }])
-        }
-
-        if (eventName === 'warning' && payload.message) {
-          setGenEvents((p) => [...p, { kind: 'warning', data: payload.message as string }])
-        }
-
-        if (eventName === 'error' && payload.message) {
-          setGenEvents((p) => [...p, { kind: 'error', data: payload.message as string }])
-        }
-
-        if (eventName === 'preview-ready' && payload.port) {
-          setPhase('preview')
-          setProject((prev) => prev ? { ...prev, phase: 'preview' } : prev)
-          setPreviewPort(payload.port as number)
-        }
-
-        if (eventName === 'preview-refresh') {
-          setPreviewRefreshTick((t) => t + 1)
-        }
-
-        eventName = ''
+  // ── Core SSE streaming helper ────────────────────────────────────────────────
+  // Streams a single skill session. Returns the payload from the `done` event.
+  const runSkill = useCallback(
+    async (skill: string, pageName?: string): Promise<Record<string, unknown>> => {
+      const phaseMap: Record<string, ProjectPhase> = {
+        'generate-specs': 'writing-specs',
+        'scaffold-frontend': 'building',
+        'build-layout': 'building',
+        'build-page': 'building',
+        'build-backend': 'building-backend',
       }
+      setPhase(phaseMap[skill] ?? 'building')
+      setProject((prev) => (prev ? { ...prev, phase: phaseMap[skill] ?? 'building' } : prev))
+      setIsBuilding(true)
+
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: id, skill, pageName }),
+      })
+
+      if (!res.body) {
+        setIsBuilding(false)
+        return {}
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      let eventName = ''
+      let doneData: Record<string, unknown> = {}
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buf += decoder.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            eventName = line.slice(7).trim()
+            continue
+          }
+          if (!line.startsWith('data: ')) continue
+
+          let payload: Record<string, unknown>
+          try {
+            payload = JSON.parse(line.slice(6))
+          } catch {
+            continue
+          }
+
+          if (payload.text) setGenEvents((p) => [...p, { kind: 'text', data: payload.text as string }])
+          if (payload.path) setGenEvents((p) => [...p, { kind: 'file', data: payload.path as string }])
+          if (payload.command) setGenEvents((p) => [...p, { kind: 'shell', data: payload.command as string }])
+
+          if (eventName === 'phase' && payload.label) {
+            const label = payload.label as string
+            setPhaseLabel(label)
+            setGenEvents((p) => [...p, { kind: 'phase', data: label }])
+          }
+
+          if (eventName === 'warning' && payload.message) {
+            setGenEvents((p) => [...p, { kind: 'warning', data: payload.message as string }])
+          }
+
+          if (eventName === 'error' && payload.message) {
+            setGenEvents((p) => [...p, { kind: 'error', data: payload.message as string }])
+          }
+
+          if (eventName === 'preview-ready' && payload.port) {
+            // preview-ready transitions us out of GenerationScreen
+            setIsBuilding(false)
+            setPhase('preview')
+            setProject((prev) => (prev ? { ...prev, phase: 'preview' } : prev))
+            setPreviewPort(payload.port as number)
+          }
+
+          if (eventName === 'preview-refresh') {
+            setPreviewRefreshTick((t) => t + 1)
+          }
+
+          if (eventName === 'done') {
+            doneData = payload
+            setGenEvents((p) => [...p, { kind: 'done', data: `${payload.skill} complete` }])
+
+            const s = payload.skill as string
+            // build-layout and build-page transition back to preview after done
+            if (s === 'build-layout' || s === 'build-page') {
+              setIsBuilding(false)
+              setPhase('preview')
+              setProject((prev) => (prev ? { ...prev, phase: 'preview' } : prev))
+            }
+            // build-backend transitions to complete
+            if (s === 'build-backend') {
+              setIsBuilding(false)
+              setPhase('complete')
+              setProject((prev) => (prev ? { ...prev, phase: 'complete' } : prev))
+            }
+          }
+
+          eventName = ''
+        }
+      }
+
+      setIsBuilding(false)
+      return doneData
+    },
+    [id],
+  )
+
+  // ── Initial pipeline: specs → scaffold ───────────────────────────────────────
+  const handleProceed = useCallback(
+    async (_dirPath: string, name: string, _overviewContent: string) => {
+      setProjectName(name)
+      setGenEvents([])
+      setPhaseLabel('')
+
+      // Step 1: write all spec files
+      setStepInfo(null) // no total yet
+      const specsDone = await runSkill('generate-specs')
+
+      // Build the approval queue from discovered pages
+      const pages = Array.isArray(specsDone.pages) ? (specsDone.pages as string[]) : ['home']
+      const queue = ['build-layout', ...pages.map((p) => `page-${p}`), 'build-backend']
+      buildQueueRef.current = queue
+      setBuildQueue(queue)
+
+      // Total build steps: scaffold + queue items
+      const total = 1 + queue.length
+      setStepInfo({ current: 1, total })
+
+      // Step 2: scaffold and start the dev server
+      // Events from specs and scaffold are shown together in the same log
+      await runSkill('scaffold-frontend')
+      // After this, preview-ready fires → isBuilding = false, phase = 'preview'
+    },
+    [runSkill],
+  )
+
+  // ── Approve: run next item from the queue ────────────────────────────────────
+  const handleApprove = useCallback(async () => {
+    const queue = buildQueueRef.current
+    if (queue.length === 0) return
+
+    const [next, ...rest] = queue
+    buildQueueRef.current = rest
+    setBuildQueue(rest)
+
+    // Advance step counter (scaffold was step 1, so layout is 2, etc.)
+    setStepInfo((prev) => prev ? { current: prev.current + 1, total: prev.total } : null)
+    setGenEvents([])
+    setPhaseLabel('')
+
+    if (next === 'build-layout') {
+      await runSkill('build-layout')
+    } else if (next.startsWith('page-')) {
+      await runSkill('build-page', next.replace(/^page-/, ''))
+    } else if (next === 'build-backend') {
+      await runSkill('build-backend')
     }
-  }
+  }, [runSkill])
 
   // Resizable divider
-  const onMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    setDragging(true)
-    const startX = e.clientX
-    const startWidth = panelWidth
-    const onMove = (ev: MouseEvent) => setPanelWidth(Math.max(300, Math.min(700, startWidth + ev.clientX - startX)))
-    const onUp = () => { setDragging(false); window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  }, [panelWidth])
+  const onMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      setDragging(true)
+      const startX = e.clientX
+      const startWidth = panelWidth
+      const onMove = (ev: MouseEvent) =>
+        setPanelWidth(Math.max(300, Math.min(700, startWidth + ev.clientX - startX)))
+      const onUp = () => {
+        setDragging(false)
+        window.removeEventListener('mousemove', onMove)
+        window.removeEventListener('mouseup', onUp)
+      }
+      window.addEventListener('mousemove', onMove)
+      window.addEventListener('mouseup', onUp)
+    },
+    [panelWidth],
+  )
 
   if (!project) {
     return (
@@ -164,9 +284,21 @@ export default function ProjectPage({ params }: Props) {
   }
 
   // Show full-screen generation loader while Claude Code is working
-  if (GENERATING_PHASES.includes(phase)) {
-    return <GenerationScreen projectName={projectName} phase={phase} events={genEvents} />
+  const showGenerationScreen = isBuilding || GENERATING_PHASES.includes(phase)
+  if (showGenerationScreen) {
+    return (
+      <GenerationScreen
+        projectName={projectName}
+        phaseLabel={phaseLabel}
+        stepInfo={stepInfo ?? undefined}
+        events={genEvents}
+      />
+    )
   }
+
+  // The next step label shown on the approve button
+  const nextStepLabel =
+    buildQueueRef.current.length > 0 ? queueItemLabel(buildQueueRef.current[0]) : undefined
 
   // Split-pane workspace
   return (
@@ -175,20 +307,23 @@ export default function ProjectPage({ params }: Props) {
         <ChatPanel
           project={project}
           phase={phase}
-          isPipelineRunning={isPipelineRunning}
+          nextStepLabel={nextStepLabel}
           onPhaseChange={handlePhaseChange}
           onProceed={handleProceed}
+          onApprove={handleApprove}
         />
       </div>
 
-      <div onMouseDown={onMouseDown} className="w-1 cursor-col-resize bg-zinc-800 hover:bg-violet-600 transition-colors shrink-0" />
+      <div
+        onMouseDown={onMouseDown}
+        className="w-1 cursor-col-resize bg-zinc-800 hover:bg-violet-600 transition-colors shrink-0"
+      />
 
       <div className="flex-1 min-w-0">
         <PreviewPanel
           port={previewPort}
           phase={phase}
-          isBuilding={isPipelineRunning}
-          buildingLabel={pipelinePhaseLabel}
+          isRestarting={previewLoading}
           refreshTick={previewRefreshTick}
         />
       </div>
