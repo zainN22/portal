@@ -41,20 +41,47 @@ export function ChatPanel({
 
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  // Greeting on mount
+  // Load persisted messages on mount; fall back to greeting for new projects
   useEffect(() => {
-    setMessages([
-      {
-        role: 'assistant',
-        content:
-          "Hi! I'm here to help you build your web app. Tell me — what are you looking to create? It can be anything: a SaaS tool, a marketplace, a portfolio, whatever's on your mind.",
-      },
-    ])
-  }, [])
+    fetch(`/api/projects/${project.id}/messages`)
+      .then((r) => r.json())
+      .then((saved: ChatMessage[]) => {
+        if (saved.length > 0) {
+          setMessages(saved)
+        } else {
+          setMessages([
+            {
+              role: 'assistant',
+              content:
+                "Hi! I'm here to help you build your web app. Tell me — what are you looking to create? It can be anything: a SaaS tool, a marketplace, a portfolio, whatever's on your mind.",
+            },
+          ])
+        }
+      })
+      .catch(() => {
+        setMessages([
+          {
+            role: 'assistant',
+            content:
+              "Hi! I'm here to help you build your web app. Tell me — what are you looking to create? It can be anything: a SaaS tool, a marketplace, a portfolio, whatever's on your mind.",
+          },
+        ])
+      })
+  }, [project.id])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, streamingText, isReady])
+
+  // ── Persist messages to the DB ───────────────────────────────────────────────
+
+  const persistMessages = useCallback((msgs: ChatMessage[]) => {
+    fetch(`/api/projects/${project.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(msgs),
+    }).catch(() => {})
+  }, [project.id])
 
   // ── Send a chat message to the gathering agent ────────────────────────────────
 
@@ -112,7 +139,10 @@ export function ChatPanel({
 
           if (eventName === 'done') {
             setStreamingText('')
-            setMessages((prev) => [...prev, { role: 'assistant', content: payload.text as string }])
+            const assistantMsg: ChatMessage = { role: 'assistant', content: payload.text as string }
+            const finalMessages = [...nextMessages, assistantMsg]
+            setMessages(finalMessages)
+            persistMessages(finalMessages)
             if (payload.ready) {
               setIsReady(true)
               onPhaseChange('ready')
@@ -124,10 +154,12 @@ export function ChatPanel({
           }
 
           if (eventName === 'error') {
-            setMessages((prev) => [
-              ...prev,
-              { role: 'assistant', content: `Something went wrong: ${payload.message}` },
-            ])
+            const errorMsg: ChatMessage = { role: 'assistant', content: `Something went wrong: ${payload.message}` }
+            setMessages((prev) => {
+              const updated = [...prev, errorMsg]
+              persistMessages(updated)
+              return updated
+            })
           }
 
           eventName = ''
@@ -137,7 +169,7 @@ export function ChatPanel({
       setStreaming(false)
       setStreamingText('')
     }
-  }, [input, messages, streaming, project.id, onPhaseChange])
+  }, [input, messages, streaming, project.id, onPhaseChange, persistMessages])
 
   // ── Handle edit messages once preview is live ─────────────────────────────────
 
@@ -145,7 +177,11 @@ export function ChatPanel({
     if (!input.trim() || streaming) return
 
     const userMsg: ChatMessage = { role: 'user', content: input.trim() }
-    setMessages((prev) => [...prev, userMsg])
+    setMessages((prev) => {
+      const updated = [...prev, userMsg]
+      persistMessages(updated)
+      return updated
+    })
     setInput('')
     setStreaming(true)
 
@@ -188,11 +224,18 @@ export function ChatPanel({
         }
       }
 
-      if (summary) setMessages((prev) => [...prev, { role: 'assistant', content: summary }])
+      if (summary) {
+        const assistantMsg: ChatMessage = { role: 'assistant', content: summary }
+        setMessages((prev) => {
+          const updated = [...prev, assistantMsg]
+          persistMessages(updated)
+          return updated
+        })
+      }
     } finally {
       setStreaming(false)
     }
-  }, [input, streaming, project.id, onPreviewRefresh])
+  }, [input, streaming, project.id, onPreviewRefresh, persistMessages])
 
   // ── Directory + name submit → hand off to parent ──────────────────────────────
 

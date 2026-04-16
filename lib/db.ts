@@ -2,7 +2,7 @@ import Database from 'better-sqlite3'
 import path from 'path'
 import os from 'os'
 import fs from 'fs'
-import type { Project, ProjectPhase } from '@/types'
+import type { Project, ProjectPhase, ChatMessage } from '@/types'
 
 const DATA_DIR = path.join(os.homedir(), '.webbuilder')
 fs.mkdirSync(DATA_DIR, { recursive: true })
@@ -20,6 +20,13 @@ db.exec(`
     updated_at INTEGER NOT NULL
   )
 `)
+
+// Migration: add messages column for existing databases
+try {
+  db.exec(`ALTER TABLE projects ADD COLUMN messages TEXT NOT NULL DEFAULT '[]'`)
+} catch {
+  // column already exists — safe to ignore
+}
 
 function rowToProject(row: Record<string, unknown>): Project {
   return {
@@ -69,6 +76,21 @@ export function evictPreviewPort(port: number, keepId: string): void {
   db.prepare(
     'UPDATE projects SET preview_port = NULL WHERE preview_port = ? AND id != ?'
   ).run(port, keepId)
+}
+
+export function getMessages(id: string): ChatMessage[] {
+  const row = db.prepare('SELECT messages FROM projects WHERE id = ?').get(id) as Record<string, unknown> | undefined
+  if (!row) return []
+  try {
+    return JSON.parse(row.messages as string) as ChatMessage[]
+  } catch {
+    return []
+  }
+}
+
+export function saveMessages(id: string, messages: ChatMessage[]): void {
+  db.prepare('UPDATE projects SET messages = ?, updated_at = ? WHERE id = ?')
+    .run(JSON.stringify(messages), Date.now(), id)
 }
 
 export function updateProject(id: string, updates: Partial<Project>): void {
