@@ -15,35 +15,57 @@ Ask follow-up questions organically. Cover these areas naturally as the conversa
 - The visual style and brand feel they want
 - Any specific technical needs or integrations
 
-When you feel you have a clear enough picture to build the app, end your message with exactly this marker on its own line:
-[READY_TO_PROCEED]
+When you feel you have a clear enough picture to build the app, structure your final message in
+TWO parts separated by the exact delimiter below.
 
-Before that marker, write a concise summary of everything you understood, formatted as:
+PART 1 — write a warm, concise summary for the user:
 **Project:** ...
 **What it does:** ...
-**Who it\'s for:** ...
+**Who it's for:** ...
 **Key features:** ...
 **Pages:** ...
 **Design direction:** ...
 **Tech notes:** ...
 
-Important: Only add [READY_TO_PROCEED] when you genuinely have enough to build the app. Keep asking until you\'re confident.`
+Then on its own line write exactly:
+---SPEC---
 
-const CONDENSE_SYSTEM = `You are writing the overview.md spec file for a web project.
-This file is the single source of truth for what needs to be built.
-It will be read by an AI agent to generate all other spec files and eventually the full codebase.
+PART 2 — write the complete overview.md spec document. This will be saved to disk and read by
+AI code-generation agents, so be thorough and precise:
 
-Write it in rich markdown. Include:
-- Project name and description
-- Who it\'s for and why they need it
-- All features and user flows described
-- All pages and what happens on each
-- Design direction (colors, style, mood if mentioned, otherwise suggest sensible defaults)
-- Tech stack (use Next.js + Tailwind for frontend, Hono + Drizzle + SQLite for backend unless user specified otherwise)
-- Any integrations, third-party services, or special requirements
-- Anything else relevant from the conversation
+# {Project Name}
 
-Be thorough and specific. This document is the foundation for the entire build.`
+## Description
+What the app does and why it exists.
+
+## Target Users
+Who uses it and what their goals are.
+
+## Features
+Bullet list of every feature described in the conversation.
+
+## Pages & Flows
+For each page: what it shows, what the user can do, how it connects to other pages.
+
+## Design
+Visual style, colour palette (specify real hex values if mentioned, otherwise choose appropriate
+defaults), typography mood, overall feel.
+
+## Tech Stack
+- Frontend: {framework — use Next.js 14 + TypeScript + Tailwind CSS unless the user specifically
+  requested something else}
+- Backend: {framework — use Hono + Drizzle ORM + SQLite unless the user needs something else, or
+  "None — frontend only" if no data persistence is needed}
+- Any third-party APIs or services
+
+## Technical Notes
+Any integrations, authentication requirements, special behaviour, or constraints.
+
+Then on the very last line write:
+[READY_TO_PROCEED]
+
+Important: only add [READY_TO_PROCEED] when you genuinely have enough to build the app.
+Keep asking until you\'re confident.`
 
 export async function POST(req: NextRequest) {
   const { projectId, messages }: { projectId: string; messages: ChatMessage[] } = await req.json()
@@ -80,42 +102,37 @@ export async function POST(req: NextRequest) {
         }
 
         const isReady = fullText.includes('[READY_TO_PROCEED]')
-        const displayText = fullText.replace(/\[READY_TO_PROCEED\]/g, '').trim()
 
         if (!isReady) {
-          // Normal reply — just done
-          send('done', { text: displayText, ready: false })
+          // Normal conversational reply
+          send('done', { text: fullText.trim(), ready: false })
           return
         }
 
-        // Agent has enough context — generate overview.md content
-        // We return it to the frontend so it can be written to disk
-        // only after the user provides their chosen directory path.
+        // The response has two parts separated by ---SPEC---:
+        //   Part 1 — user-facing summary (shown in chat)
+        //   Part 2 — full overview.md spec document (saved to disk)
+        const specDelimiter = '---SPEC---'
+        const delimIdx = fullText.indexOf(specDelimiter)
+
+        let displayText: string
+        let overviewContent: string
+
+        if (delimIdx !== -1) {
+          displayText = fullText.slice(0, delimIdx).replace(/\[READY_TO_PROCEED\]/g, '').trim()
+          overviewContent = fullText
+            .slice(delimIdx + specDelimiter.length)
+            .replace(/\[READY_TO_PROCEED\]/g, '')
+            .trim()
+        } else {
+          // Fallback: model didn't use the delimiter — use the whole response as both
+          displayText = fullText.replace(/\[READY_TO_PROCEED\]/g, '').trim()
+          overviewContent = displayText
+        }
+
         setPhase(projectId, 'ready')
+        // overview-ready fires immediately — no second API call, no spinner delay
         send('done', { text: displayText, ready: true })
-
-        const condenseMessages = [
-          ...messages,
-          { role: 'assistant' as const, content: displayText },
-          { role: 'user' as const, content: 'Write the overview.md file now based on our entire conversation.' },
-        ]
-
-        const overviewRes = await anthropic.messages.create({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 4096,
-          system: CONDENSE_SYSTEM,
-          messages: condenseMessages
-            .filter((m) => m.role === 'user' || m.role === 'assistant')
-            .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })) as Anthropic.MessageParam[],
-        })
-
-        const overviewContent = overviewRes.content
-          .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-          .map((b) => b.text)
-          .join('')
-
-        // Send the overview content back to the frontend.
-        // It will be submitted alongside the directory path when the user clicks Proceed.
         send('overview-ready', { content: overviewContent })
 
       } catch (err) {
