@@ -16,6 +16,7 @@ interface RunningPreview {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   proc: any
   port: number
+  projectDir: string
 }
 
 // projectId → running subprocess + port
@@ -31,9 +32,9 @@ const PORT_RANGE_START = 3100
  * call both from the build pipeline and from the "reopen project" path.
  */
 export async function startPreview(projectId: string, projectDir: string): Promise<number> {
-  // ── Reuse existing server if it is still alive ─────────────────────────────
+  // ── Reuse existing server if it is still alive AND serving the right project
   const existing = processes.get(projectId)
-  if (existing && (await isPortAlive(existing.port))) {
+  if (existing && existing.projectDir === projectDir && (await isPortAlive(existing.port))) {
     return existing.port
   }
 
@@ -53,7 +54,7 @@ export async function startPreview(projectId: string, projectDir: string): Promi
     },
   )
 
-  processes.set(projectId, { proc, port })
+  processes.set(projectId, { proc, port, projectDir })
 
   // Wait for the port to be open (max 60 s — first run after npm install can be slow)
   await waitForPort(port, 60_000)

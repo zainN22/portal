@@ -20,7 +20,7 @@
  *    handles compilation continuously; the type check is sufficient.
  *  - All `npm install` commands use a shared cache at ~/.webbuilder/npm-cache so
  *    packages downloaded once are reused across projects.
- *  - The generate-specs session writes client/specs/dependencies.md so the
+ *  - The generate-specs session writes specs/client/dependencies.md so the
  *    scaffold session can install ALL third-party packages in a single pass
  *    rather than discovering them piecemeal mid-session.
  */
@@ -81,25 +81,25 @@ There is NO fixed list. Reason from the overview and write ONLY what this projec
 actually requires. Do not write placeholder or "we might need this" files.
 
 **Frontend (if any):**
-- Always: \`client/specs/overview.md\` — stack, folder structure, conventions
-- If there's a design system: \`client/specs/design/tokens.md\` and \`client/specs/design/components.md\`
-- For each major page or page group: \`client/specs/pages/{name}.md\`
-- If frontend fetches from an API: \`client/specs/data-fetching.md\`
-- If global UI state: \`client/specs/state.md\`
-- If assets/copy: \`client/specs/content/assets.md\`
-- If realtime/websockets in the UI: \`client/specs/realtime.md\`
+- Always: \`specs/client/overview.md\` — stack, folder structure, conventions
+- If there's a design system: \`specs/client/design/tokens.md\` and \`specs/client/design/components.md\`
+- For each major page or page group: \`specs/client/pages/{name}.md\`
+- If frontend fetches from an API: \`specs/client/data-fetching.md\`
+- If global UI state: \`specs/client/state.md\`
+- If assets/copy: \`specs/client/content/assets.md\`
+- If realtime/websockets in the UI: \`specs/client/realtime.md\`
 
 **Backend (if any):**
-- Always: \`server/specs/overview.md\` — stack, folder structure, conventions
-- If persistent data: \`server/specs/database.md\`
-- If business logic: \`server/specs/services.md\`
-- If REST API: \`server/specs/api-routes.md\`
-- If background jobs/queues/email: \`server/specs/jobs.md\`
-- If websockets server-side: \`server/specs/websocket.md\`
-- If env vars / deployment: \`server/specs/environments.md\`
+- Always: \`specs/server/overview.md\` — stack, folder structure, conventions
+- If persistent data: \`specs/server/database.md\`
+- If business logic: \`specs/server/services.md\`
+- If REST API: \`specs/server/api-routes.md\`
+- If background jobs/queues/email: \`specs/server/jobs.md\`
+- If websockets server-side: \`specs/server/websocket.md\`
+- If env vars / deployment: \`specs/server/environments.md\`
 
 **Shared (if both frontend and backend exist):**
-- \`server-client-communication.md\` — REST shapes, auth tokens, error codes, WS events
+- \`specs/server-client-communication.md\` — REST shapes, auth tokens, error codes, WS events
 
 ## Step 3 — Write each spec file
 
@@ -112,7 +112,7 @@ Write specs specific to THIS project:
 - Describe actual UI components needed
 - Be thorough — the spec is the blueprint for the entire codebase
 
-## Step 4 — Write client/specs/dependencies.md
+## Step 4 — Write specs/client/dependencies.md
 
 This file tells the scaffold session exactly which packages to install in one pass.
 List ONLY packages that are NOT already included by create-next-app
@@ -132,13 +132,13 @@ Format:
 If no additional packages are needed, write the file with just the heading and
 "No additional packages required."
 
-If the project has a backend, also write \`server/specs/dependencies.md\` in the same format.
+If the project has a backend, also write \`specs/server/dependencies.md\` in the same format.
 
 ## Step 5 — Write CLAUDE.md last
 
 CLAUDE.md must:
 1. State the role: "You are building {app name}"
-2. List every spec file created in the ORDER they should be read before writing code
+2. List every spec file created (under \`specs/\`) in the ORDER they should be read before writing code
 3. Define hard rules specific to this project (e.g. "NEVER hardcode colours, always use tokens")
 4. Define the tech stack
 5. Define the folder structure
@@ -155,7 +155,7 @@ create the project structure, install ALL dependencies, apply global tokens, and
 files. Do NOT build any components or pages yet.
 
 ## Step 1 — Read context and detect the tech stack
-Read \`overview.md\`, then \`CLAUDE.md\`, then \`client/specs/overview.md\`.
+Read \`overview.md\`, then \`CLAUDE.md\`, then \`specs/client/overview.md\`.
 The Tech Stack section of overview.md is authoritative. Extract:
 - The frontend framework (e.g. Next.js, Vite + React, Vite + Vue, SvelteKit, etc.)
 - Whether TypeScript is required
@@ -200,7 +200,7 @@ If the stack uses Tailwind and the scaffold did not include it, install and conf
 following the official guide for the detected framework.
 
 ## Step 4 — Install all project-specific dependencies in one pass
-Read \`client/specs/dependencies.md\`.
+Read \`specs/client/dependencies.md\`.
 Extract every package listed under Runtime and Dev sections.
 If there are Runtime packages:
 \`\`\`
@@ -214,7 +214,7 @@ If the file says "No additional packages required", skip this step.
 **Never run npm install again in any later session — all packages are installed here.**
 
 ## Step 5 — Apply design tokens
-Read \`client/specs/design/tokens.md\`.
+Read \`specs/client/design/tokens.md\`.
 Write all colour, typography, and spacing values as CSS custom properties in the global
 stylesheet (globals.css for Next.js, index.css or App.css for Vite, etc.).
 Remove default framework boilerplate styles; keep only the :root token block and base resets.
@@ -261,8 +261,8 @@ layout wrapper. Do NOT build any page content or page-specific sections this ses
 ## Step 1 — Read context (do not scan source files)
 Read these files in order — this is all the context you need:
 1. \`documentation/scaffold.md\` — packages available, token variable names, folder structure
-2. \`client/specs/design/tokens.md\` — colour/spacing values
-3. \`client/specs/design/components.md\` — component primitives to use
+2. \`specs/client/design/tokens.md\` — colour/spacing values
+3. \`specs/client/design/components.md\` — component primitives to use
 4. \`CLAUDE.md\` — project rules and stack
 
 ## Step 2 — Build layout components
@@ -337,6 +337,8 @@ Append to \`documentation/pages.md\` (create if it does not exist):
 Then STOP. Write nothing else.
 
 ---
+
+**Note:** Page spec files are located under \`specs/client/pages/\`, not inside \`client/\`.
 `
 
 // ─── Skill: Build Backend ─────────────────────────────────────────────────────
@@ -346,17 +348,17 @@ const BUILD_BACKEND_SKILL = `# build-backend
 You are generating the complete backend codebase and wiring it to the frontend.
 
 ## Step 1 — Read context
-Read \`CLAUDE.md\`, then all \`server/specs/\` files, then \`server-client-communication.md\`.
+Read \`CLAUDE.md\`, then all \`specs/server/\` files, then \`specs/server-client-communication.md\`.
 Also read \`documentation/scaffold.md\` and \`documentation/pages.md\` to understand what the
 frontend expects.
 
 ## Step 2 — Scaffold
 Check if \`server/package.json\` exists. If not, scaffold based on the stack in
-\`server/specs/overview.md\`. Place all source code under \`server/src/\`.
+\`specs/server/overview.md\`. Place all source code under \`server/src/\`.
 
 Install server dependencies:
 \`\`\`
-cd server && npm install <packages from server/specs/dependencies.md> --cache ~/.webbuilder/npm-cache
+cd server && npm install <packages from specs/server/dependencies.md> --cache ~/.webbuilder/npm-cache
 \`\`\`
 
 Create:
@@ -374,7 +376,7 @@ Implement everything in the server specs:
 
 ## Step 4 — Wire frontend to backend
 Update the frontend to call real API endpoints:
-- Add API client setup per \`client/specs/data-fetching.md\`
+- Add API client setup per \`specs/client/data-fetching.md\`
 - Replace any hardcoded/mock data with real API calls
 - Add \`NEXT_PUBLIC_API_URL\` to \`client/.env\` and \`client/.env.example\`
 

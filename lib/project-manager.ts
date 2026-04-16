@@ -32,8 +32,9 @@ export function initProject(name: string): Project {
  * Creates:
  *   {userPath}/{projectName}/
  *     ├── overview.md          ← condensed from the chat conversation
- *     ├── client/              ← scaffolded by Claude Code
- *     ├── server/              ← scaffolded by Claude Code
+ *     ├── specs/               ← blueprint spec files (client + server)
+ *     ├── client/              ← created by scaffold-frontend (NOT pre-created)
+ *     ├── server/              ← created by build-backend (NOT pre-created)
  *     ├── documentation/       ← context handoff files between sessions
  *     └── .claude/
  *         ├── commands/        ← skill files (generate-specs, build-frontend, etc.)
@@ -54,8 +55,10 @@ export function setupProjectDir(
   fs.mkdirSync(projectDir, { recursive: true })
 
   // Scaffold the directory structure
-  fs.mkdirSync(path.join(projectDir, 'client'), { recursive: true })
-  fs.mkdirSync(path.join(projectDir, 'server'), { recursive: true })
+  // NOTE: client/ and server/ are NOT pre-created here. They are created by
+  // scaffold-frontend and build-backend respectively (via create-next-app, etc.).
+  // Pre-creating them causes scaffold tools to fail on non-empty directories.
+  fs.mkdirSync(path.join(projectDir, 'specs'), { recursive: true })
   fs.mkdirSync(path.join(projectDir, 'documentation'), { recursive: true })
 
   // Write overview.md — this IS the requirements document
