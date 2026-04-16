@@ -294,16 +294,18 @@ export function ChatPanel({
   return (
     <div className="flex flex-col h-full bg-zinc-950">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-zinc-800 shrink-0">
+      <div className="px-4 py-3 border-b border-zinc-800/60 bg-gradient-to-b from-zinc-900 to-zinc-950 shrink-0">
         <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-violet-500" />
-          <span className="text-sm font-medium text-zinc-200">{project.name}</span>
-          <span className="ml-auto text-xs text-zinc-500 capitalize">{phase.replace(/-/g, ' ')}</span>
+          <div className="w-2 h-2 rounded-full bg-gradient-to-r from-violet-500 to-violet-600" />
+          <span className="text-sm font-semibold text-zinc-100">{project.name}</span>
+          <span className="ml-auto text-xs font-medium text-zinc-500 bg-zinc-900/50 px-2.5 py-0.5 rounded-full capitalize">
+            {phase.replace(/-/g, ' ')}
+          </span>
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      {/* Messages — scrollable with custom scrollbar */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {messages.map((m, i) => (
           <MessageBubble
             key={i}
@@ -318,11 +320,11 @@ export function ChatPanel({
 
         {/* Project name + path picker — shown once agent is ready */}
         {isReady && (
-          <div className="mt-4 bg-zinc-900 border border-zinc-700 rounded-2xl p-4 space-y-3">
-            <p className="text-sm font-medium text-zinc-200">Let&apos;s set up your project</p>
+          <div className="mt-6 bg-gradient-to-br from-zinc-900 via-zinc-900 to-zinc-950 border border-zinc-700/40 shadow-lg shadow-violet-900/20 rounded-2xl p-4 space-y-3">
+            <p className="text-sm font-semibold text-zinc-100">Let's set up your project</p>
 
-            <div className="space-y-1">
-              <label className="text-xs text-zinc-500">Project name</label>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Project name</label>
               <input
                 type="text"
                 value={projectName}
@@ -331,18 +333,18 @@ export function ChatPanel({
                   setDirError('')
                 }}
                 placeholder="my-saas-app"
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 outline-none focus:border-violet-500 transition-colors"
+                className="w-full bg-zinc-800/50 border border-zinc-700/60 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 focus:bg-zinc-800 transition-all"
               />
-              <p className="text-xs text-zinc-600">
-                Folder will be created as{' '}
-                <code className="text-zinc-500">
+              <p className="text-xs text-zinc-600 flex items-center gap-1">
+                <span className="text-zinc-700">→</span>
+                <code className="text-zinc-500 font-mono">
                   project-{projectName ? projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-') : 'name'}/
                 </code>
               </p>
             </div>
 
-            <div className="space-y-1">
-              <label className="text-xs text-zinc-500">Where to create it</label>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Where to create it</label>
               <input
                 type="text"
                 value={dirPath}
@@ -351,24 +353,29 @@ export function ChatPanel({
                   setDirError('')
                 }}
                 onKeyDown={(e) => e.key === 'Enter' && handleSetup()}
-                placeholder="/Users/you/projects"
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 font-mono placeholder-zinc-600 outline-none focus:border-violet-500 transition-colors"
+                placeholder="/home/you/projects"
+                className="w-full bg-zinc-800/50 border border-zinc-700/60 rounded-lg px-3 py-2 text-sm text-zinc-100 font-mono placeholder-zinc-600 outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 focus:bg-zinc-800 transition-all"
               />
             </div>
 
             {!overviewContent && (
               <div className="flex items-center gap-2 text-xs text-zinc-500">
-                <div className="w-3 h-3 border border-zinc-500 border-t-transparent rounded-full animate-spin shrink-0" />
-                Preparing requirements...
+                <div className="w-3 h-3 border-2 border-transparent border-t-violet-500 rounded-full animate-spin shrink-0" />
+                <span>Preparing requirements...</span>
               </div>
             )}
 
-            {dirError && <p className="text-xs text-red-400">{dirError}</p>}
+            {dirError && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-red-900/20 border border-red-500/30 rounded-lg">
+                <div className="w-1 h-1 rounded-full bg-red-500 shrink-0" />
+                <p className="text-xs text-red-400">{dirError}</p>
+              </div>
+            )}
 
             <button
               onClick={handleSetup}
               disabled={settingUp || !projectName.trim() || !dirPath.trim() || !overviewContent}
-              className="w-full py-2.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-xl transition-colors"
+              className="w-full py-2.5 bg-gradient-to-r from-violet-600 to-violet-500 hover:from-violet-500 hover:to-violet-400 disabled:from-zinc-700 disabled:to-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl transition-all duration-150 shadow-lg shadow-violet-900/30 hover:shadow-lg hover:shadow-violet-900/40 disabled:shadow-none"
             >
               {settingUp ? 'Setting up...' : 'Create project and start building →'}
             </button>
@@ -380,14 +387,12 @@ export function ChatPanel({
 
       {/* ── Approve CTA ─── shown between messages and input when preview is live */}
       {showApprove && (
-        <div className="px-4 pt-3 pb-1 border-t border-zinc-800 shrink-0 space-y-2">
-          <p className="text-xs text-zinc-500 text-center">
-            Chat to make edits, or approve to continue
-          </p>
+        <div className="px-4 pt-3 pb-2 border-t border-zinc-800/60 bg-gradient-to-t from-zinc-950 to-transparent shrink-0 space-y-2">
+          <p className="text-xs text-zinc-500 text-center font-medium">Chat to make edits, or approve to continue</p>
           <button
             onClick={onApprove}
             disabled={streaming}
-            className="w-full py-2.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-xl transition-colors"
+            className="w-full py-2.5 bg-gradient-to-r from-violet-600 to-violet-500 hover:from-violet-500 hover:to-violet-400 disabled:from-zinc-700 disabled:to-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl transition-all duration-150 shadow-lg shadow-violet-900/30 hover:shadow-lg hover:shadow-violet-900/40"
           >
             Approve → {nextStepLabel}
           </button>
@@ -396,8 +401,8 @@ export function ChatPanel({
 
       {/* Input bar */}
       {canChat && (
-        <div className="px-4 py-3 border-t border-zinc-800 shrink-0">
-          <div className="flex items-end gap-2 bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 focus-within:border-violet-500 transition-colors">
+        <div className="px-4 py-3 border-t border-zinc-800/60 bg-gradient-to-t from-zinc-950 to-transparent shrink-0 space-y-2">
+          <div className="flex items-end gap-2 bg-gradient-to-b from-zinc-900/50 to-zinc-900 border border-zinc-700/50 rounded-xl px-3 py-2.5 focus-within:border-violet-500/50 focus-within:ring-1 focus-within:ring-violet-500/20 focus-within:bg-zinc-900 transition-all">
             <textarea
               ref={inputRef}
               value={input}
@@ -411,14 +416,14 @@ export function ChatPanel({
             <button
               onClick={isPreviewPhase ? sendEdit : sendMessage}
               disabled={!input.trim() || streaming}
-              className="p-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors shrink-0"
+              className="p-2 bg-gradient-to-r from-violet-600 to-violet-500 hover:from-violet-500 hover:to-violet-400 disabled:from-zinc-700 disabled:to-zinc-600 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-all duration-150 shrink-0 shadow-md shadow-violet-900/30 hover:shadow-md hover:shadow-violet-900/40"
             >
               <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" />
               </svg>
             </button>
           </div>
-          <p className="text-xs text-zinc-600 mt-1.5 pl-1">Enter to send · Shift+Enter for new line</p>
+          <p className="text-xs text-zinc-600 font-medium pl-1">⏎ Send · Shift+⏎ New line</p>
         </div>
       )}
     </div>
