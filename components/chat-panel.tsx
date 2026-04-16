@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { MessageBubble } from './message-bubble'
-import type { ChatMessage, Project, ProjectPhase } from '@/types'
+import type { ChatMessage, GenerationEvent, Project, ProjectPhase } from '@/types'
 
 interface Props {
   project: Project
@@ -13,6 +13,9 @@ interface Props {
   onProceed: (dirPath: string, projectName: string, overviewContent: string) => void
   onApprove: () => void
   onPreviewRefresh?: () => void
+  onEditStart?: () => void
+  onEditEnd?: () => void
+  onEditEvent?: (event: GenerationEvent) => void
 }
 
 export function ChatPanel({
@@ -23,6 +26,9 @@ export function ChatPanel({
   onProceed,
   onApprove,
   onPreviewRefresh,
+  onEditStart,
+  onEditEnd,
+  onEditEvent,
 }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -148,6 +154,7 @@ export function ChatPanel({
     setMessages((prev) => [...prev, userMsg])
     setInput('')
     setStreaming(true)
+    onEditStart?.()
 
     try {
       const res = await fetch('/api/edit', {
@@ -179,8 +186,15 @@ export function ChatPanel({
           if (!line.startsWith('data: ')) continue
           try {
             const p = JSON.parse(line.slice(6))
-            if (p.text) summary += p.text as string
+            if (p.text) {
+              summary += p.text as string
+              onEditEvent?.({ kind: 'text', data: p.text as string })
+            }
+            if (p.path) onEditEvent?.({ kind: 'file', data: p.path as string })
+            if (p.command) onEditEvent?.({ kind: 'shell', data: p.command as string })
+            if (eventName === 'phase' && p.label) onEditEvent?.({ kind: 'phase', data: p.label as string })
             if (eventName === 'preview-refresh') onPreviewRefresh?.()
+            if (eventName === 'done') onEditEvent?.({ kind: 'done', data: 'Edit complete' })
           } catch {
             /* ignore */
           }
@@ -191,8 +205,9 @@ export function ChatPanel({
       if (summary) setMessages((prev) => [...prev, { role: 'assistant', content: summary }])
     } finally {
       setStreaming(false)
+      onEditEnd?.()
     }
-  }, [input, streaming, project.id, onPreviewRefresh])
+  }, [input, streaming, project.id, onPreviewRefresh, onEditStart, onEditEnd, onEditEvent])
 
   // ── Directory + name submit → hand off to parent ──────────────────────────────
 

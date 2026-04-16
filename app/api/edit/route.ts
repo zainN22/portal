@@ -23,12 +23,14 @@ export async function POST(req: NextRequest) {
         const fullPrompt = `${skillPrompt}\n\n---\n\nUser request: "${userRequest}"`
 
         send('start', { userRequest })
+        send('phase', { label: 'Applying changes...' })
 
         for await (const message of query({
           prompt: fullPrompt,
           options: {
             cwd: projectDir,
-            maxTurns: 20,
+            model: 'opus',
+            maxTurns: 150,
             permissionMode: 'bypassPermissions',
             allowDangerouslySkipPermissions: true,
           },
@@ -44,6 +46,10 @@ export async function POST(req: NextRequest) {
                   ? filePath.slice(projectDir.length + 1)
                   : filePath
                 send('file', { path: relative })
+              }
+              if (block.type === 'tool_use' && block.name === 'Bash') {
+                const cmd = ((block.input as Record<string, string>).command ?? '').slice(0, 120)
+                send('shell', { command: cmd })
               }
             }
           }

@@ -44,6 +44,11 @@ export function ProjectWorkspace({ id }: { id: string }) {
   const [phaseLabel, setPhaseLabel] = useState('')
   const [stepInfo, setStepInfo] = useState<{ current: number; total: number } | null>(null)
 
+  // Edit-mode generation screen
+  const [isEditing, setIsEditing] = useState(false)
+  const [editEvents, setEditEvents] = useState<GenerationEvent[]>([])
+  const [editPhaseLabel, setEditPhaseLabel] = useState('')
+
   // Incrementing this causes the preview iframe to reload
   const [previewRefreshTick, setPreviewRefreshTick] = useState(0)
 
@@ -103,6 +108,21 @@ export function ProjectWorkspace({ id }: { id: string }) {
 
   const handlePreviewRefresh = useCallback(() => {
     setPreviewRefreshTick((t) => t + 1)
+  }, [])
+
+  const handleEditStart = useCallback(() => {
+    setEditEvents([])
+    setEditPhaseLabel('Applying changes...')
+    setIsEditing(true)
+  }, [])
+
+  const handleEditEnd = useCallback(() => {
+    setIsEditing(false)
+  }, [])
+
+  const handleEditEvent = useCallback((event: GenerationEvent) => {
+    if (event.kind === 'phase') setEditPhaseLabel(event.data)
+    setEditEvents((prev) => [...prev, event])
   }, [])
 
   const handlePhaseChange = useCallback((p: ProjectPhase) => {
@@ -362,6 +382,15 @@ export function ProjectWorkspace({ id }: { id: string }) {
   // Split-pane workspace
   return (
     <div className={`h-screen flex overflow-hidden bg-zinc-950 ${dragging ? 'select-none' : ''}`}>
+      {/* Edit-mode generation overlay — rendered on top, ChatPanel stays mounted underneath */}
+      {isEditing && (
+        <GenerationScreen
+          projectName={projectName}
+          phaseLabel={editPhaseLabel}
+          events={editEvents}
+        />
+      )}
+
       <div style={{ width: panelWidth, minWidth: 300 }} className="flex-shrink-0 border-r border-zinc-800">
         <ChatPanel
           project={project}
@@ -371,6 +400,9 @@ export function ProjectWorkspace({ id }: { id: string }) {
           onProceed={handleProceed}
           onApprove={handleApprove}
           onPreviewRefresh={handlePreviewRefresh}
+          onEditStart={handleEditStart}
+          onEditEnd={handleEditEnd}
+          onEditEvent={handleEditEvent}
         />
       </div>
 

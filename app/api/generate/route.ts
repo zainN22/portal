@@ -34,7 +34,6 @@ export async function POST(req: NextRequest) {
 
       /**
        * Runs a single Claude Code session for one skill.
-       * 80 turns — large enough for complex pages, small enough to stay focused.
        */
       async function runSession(skillName: string, extraPrompt = '') {
         const skillPrompt = readSkill(projectDir, skillName)
@@ -45,7 +44,8 @@ export async function POST(req: NextRequest) {
             prompt: fullPrompt,
             options: {
               cwd: projectDir,
-              maxTurns: 80,
+              model: 'opus',
+              maxTurns: 150,
               permissionMode: 'bypassPermissions',
               allowDangerouslySkipPermissions: true,
             },
