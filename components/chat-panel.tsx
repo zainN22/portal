@@ -12,6 +12,7 @@ interface Props {
   onPhaseChange: (phase: ProjectPhase) => void
   onProceed: (dirPath: string, projectName: string, overviewContent: string) => void
   onApprove: () => void
+  onPreviewRefresh?: () => void
 }
 
 export function ChatPanel({
@@ -21,6 +22,7 @@ export function ChatPanel({
   onPhaseChange,
   onProceed,
   onApprove,
+  onPreviewRefresh,
 }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -161,6 +163,8 @@ export function ChatPanel({
       let buf = ''
       let summary = ''
 
+      let eventName = ''
+
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -168,13 +172,19 @@ export function ChatPanel({
         const lines = buf.split('\n')
         buf = lines.pop() ?? ''
         for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            eventName = line.slice(7).trim()
+            continue
+          }
           if (!line.startsWith('data: ')) continue
           try {
             const p = JSON.parse(line.slice(6))
             if (p.text) summary += p.text as string
+            if (eventName === 'preview-refresh') onPreviewRefresh?.()
           } catch {
             /* ignore */
           }
+          eventName = ''
         }
       }
 
@@ -182,7 +192,7 @@ export function ChatPanel({
     } finally {
       setStreaming(false)
     }
-  }, [input, streaming, project.id])
+  }, [input, streaming, project.id, onPreviewRefresh])
 
   // ── Directory + name submit → hand off to parent ──────────────────────────────
 

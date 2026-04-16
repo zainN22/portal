@@ -49,6 +49,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        send('preview-refresh', {})
         send('done', {})
       } catch (err) {
         send('error', { message: String(err) })

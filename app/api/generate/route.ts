@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
           send('phase', { label: `Building ${name} page...` })
           await runSession(
             'build-page',
-            `## Page to build\n\`${name}\` — read \`client/specs/pages/${name}.md\` for the full spec.`,
+            `## Page to build\n\`${name}\` — read \`specs/client/pages/${name}.md\` for the full spec.`,
           )
           setPhase(projectId, 'preview')
           send('preview-refresh', {})
@@ -166,7 +166,7 @@ export async function POST(req: NextRequest) {
  * need to be built. Falls back to ['home'] if no spec pages directory exists.
  */
 function discoverPages(projectDir: string): string[] {
-  const pagesDir = path.join(projectDir, 'client', 'specs', 'pages')
+  const pagesDir = path.join(projectDir, 'specs', 'client', 'pages')
   if (!fs.existsSync(pagesDir)) return ['home']
   const files = fs.readdirSync(pagesDir).filter((f) => f.endsWith('.md'))
   return files.length > 0 ? files.map((f) => f.replace('.md', '')) : ['home']

@@ -56,6 +56,13 @@ export default function ProjectPage({ params }: Props) {
   const [panelWidth, setPanelWidth] = useState(420)
   const [dragging, setDragging] = useState(false)
 
+  // Reset preview state when navigating between projects so the iframe
+  // never briefly shows a previous project's content.
+  useEffect(() => {
+    setPreviewPort(null)
+    setPreviewRefreshTick(0)
+  }, [id])
+
   useEffect(() => {
     fetch(`/api/projects/${id}`)
       .then((r) => r.json())
@@ -84,6 +91,10 @@ export default function ProjectPage({ params }: Props) {
       })
       .catch(() => router.push('/'))
   }, [id, router])
+
+  const handlePreviewRefresh = useCallback(() => {
+    setPreviewRefreshTick((t) => t + 1)
+  }, [])
 
   const handlePhaseChange = useCallback((p: ProjectPhase) => {
     setPhase(p)
@@ -311,6 +322,7 @@ export default function ProjectPage({ params }: Props) {
           onPhaseChange={handlePhaseChange}
           onProceed={handleProceed}
           onApprove={handleApprove}
+          onPreviewRefresh={handlePreviewRefresh}
         />
       </div>
 
