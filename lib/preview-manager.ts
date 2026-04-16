@@ -32,13 +32,22 @@ const PORT_RANGE_START = 3100
  * call both from the build pipeline and from the "reopen project" path.
  */
 export async function startPreview(projectId: string, projectDir: string): Promise<number> {
-  // ── Reuse existing server if it is still alive AND serving the right project
+  // ── Stop all OTHER projects' servers first ─────────────────────────────────
+  // Only one dev server should run at a time. Stopping others first ensures
+  // port 3100 is freed for the current project and prevents port accumulation.
+  for (const [otherId] of processes) {
+    if (otherId !== projectId) {
+      await stopPreview(otherId)
+    }
+  }
+
+  // ── Reuse THIS project's server if it is still alive
   const existing = processes.get(projectId)
   if (existing && existing.projectDir === projectDir && (await isPortAlive(existing.port))) {
     return existing.port
   }
 
-  // ── Stop any stale tracked process ─────────────────────────────────────────
+  // ── Stale entry for this project — clean it up ────────────────────────────
   await stopPreview(projectId)
 
   const clientDir = path.join(projectDir, 'client')
