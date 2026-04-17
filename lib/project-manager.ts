@@ -18,6 +18,8 @@ export function initProject(name: string): Project {
     phase: 'gathering',
     dir: null,
     previewPort: null,
+    buildQueue: null,
+    discoveredPages: null,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   }

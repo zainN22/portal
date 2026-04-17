@@ -13,6 +13,8 @@ export interface Project {
   phase: ProjectPhase
   dir: string | null     // null until user provides a path and we create it
   previewPort: number | null
+  buildQueue: string[] | null // skills left to run (scaffold, layout, pages...)
+  discoveredPages: string[] | null // pages found during generate-specs
   createdAt: number
   updatedAt: number
 }

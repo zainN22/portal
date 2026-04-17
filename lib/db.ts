@@ -28,13 +28,29 @@ try {
   // column already exists — safe to ignore
 }
 
+try {
+  db.exec(`ALTER TABLE projects ADD COLUMN build_queue TEXT`)
+  db.exec(`ALTER TABLE projects ADD COLUMN discovered_pages TEXT`)
+} catch {
+  // already exist
+}
+
 function rowToProject(row: Record<string, unknown>): Project {
+  let buildQueue: string[] | null = null
+  let discoveredPages: string[] | null = null
+  try {
+    if (row.build_queue) buildQueue = JSON.parse(row.build_queue as string)
+    if (row.discovered_pages) discoveredPages = JSON.parse(row.discovered_pages as string)
+  } catch { }
+
   return {
     id: row.id as string,
     name: row.name as string,
     phase: row.phase as ProjectPhase,
     dir: (row.dir as string) ?? null,
     previewPort: (row.preview_port as number) ?? null,
+    buildQueue,
+    discoveredPages,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
   }
@@ -42,14 +58,16 @@ function rowToProject(row: Record<string, unknown>): Project {
 
 export function createProject(project: Project): void {
   db.prepare(`
-    INSERT INTO projects (id, name, phase, dir, preview_port, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO projects (id, name, phase, dir, preview_port, build_queue, discovered_pages, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     project.id,
     project.name,
     project.phase,
     project.dir,
     project.previewPort,
+    project.buildQueue ? JSON.stringify(project.buildQueue) : null,
+    project.discoveredPages ? JSON.stringify(project.discoveredPages) : null,
     project.createdAt,
     project.updatedAt
   )
@@ -101,6 +119,8 @@ export function updateProject(id: string, updates: Partial<Project>): void {
   if (updates.phase !== undefined) { fields.push('phase = ?'); values.push(updates.phase) }
   if (updates.dir !== undefined) { fields.push('dir = ?'); values.push(updates.dir) }
   if (updates.previewPort !== undefined) { fields.push('preview_port = ?'); values.push(updates.previewPort) }
+  if (updates.buildQueue !== undefined) { fields.push('build_queue = ?'); values.push(updates.buildQueue ? JSON.stringify(updates.buildQueue) : null) }
+  if (updates.discoveredPages !== undefined) { fields.push('discovered_pages = ?'); values.push(updates.discoveredPages ? JSON.stringify(updates.discoveredPages) : null) }
 
   fields.push('updated_at = ?')
   values.push(Date.now())

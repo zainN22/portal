@@ -239,7 +239,9 @@ export function ProjectWorkspace({ id }: { id: string }) {
 
         setProject(p)
         setPhase(p.phase)
-        setPreviewPort(p.previewPort) // 👈 FIX 1: Initialize port state on mount
+        setPreviewPort(p.previewPort)
+        setBuildQueue(p.buildQueue || [])
+        buildQueueRef.current = p.buildQueue || []
         setProjectName(p.name !== 'New Project' ? p.name : 'Your app')
 
         // ── RECONNECT: If project is in a building phase, reconnect to events stream.
@@ -251,9 +253,10 @@ export function ProjectWorkspace({ id }: { id: string }) {
           setGenEvents([{ kind: 'phase', data: 'Reconnecting to build...' }])
 
           let hasPortFromStream = false
+          let streamDoneData: Record<string, unknown> | null = null
           try {
             // Connect to the events endpoint — it will send all buffered events first
-            await connectToEvents(0)
+            streamDoneData = await connectToEvents(0)
             // If connectToEvents received a 'preview-ready' event, it already called setPreviewPort
             if (previewPort) hasPortFromStream = true
           } catch (err) {
@@ -290,6 +293,38 @@ export function ProjectWorkspace({ id }: { id: string }) {
                 }
               } else if (updated.previewPort) {
                 setPreviewPort(updated.previewPort)
+              }
+
+              // ── AUTO-RESUME PIPELINE: If we were in the middle of a multi-step build, continuue.
+              // If the project doesn't have a queue yet (it was lost during refresh), we reconstruct it from the stream data.
+              if (streamDoneData?.skill === 'generate-specs') {
+                console.log('[ProjectWorkspace] 🔄 Resuming pipeline after specs...')
+
+                if (!updated.buildQueue) {
+                  const pages = Array.isArray(streamDoneData.pages)
+                    ? (streamDoneData.pages as string[])
+                    : (updated.discoveredPages || ['home'])
+                  const queue = ['build-layout', ...pages.map((p) => `page-${p}`), 'build-backend']
+
+                  // Save the reconstructed queue to the DB
+                  await fetch(`/api/projects/${id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ buildQueue: queue, discoveredPages: pages }),
+                  })
+
+                  // Update local state
+                  setBuildQueue(queue)
+                  buildQueueRef.current = queue
+                }
+
+                // If we are still in writing-specs, proceed to the next skill
+                if (updated.phase === 'writing-specs') {
+                  router.refresh()
+                  handleApprove()
+                }
+              } else if (updated.buildQueue && updated.buildQueue.length > 0) {
+                // If we have a queue, we could continue. For intermediate steps, we currently rely on the "Next" button.
               }
             }
           } catch {
@@ -364,6 +399,16 @@ export function ProjectWorkspace({ id }: { id: string }) {
       buildQueueRef.current = queue
       setBuildQueue(queue)
 
+      // Save queue and discovered pages to DB so it survives refresh
+      await fetch(`/api/projects/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          buildQueue: queue,
+          discoveredPages: pages,
+        }),
+      })
+
       const total = 1 + queue.length
       setStepInfo({ current: 1, total })
 
@@ -430,7 +475,14 @@ export function ProjectWorkspace({ id }: { id: string }) {
     } else if (next === 'build-backend') {
       await runSkill('build-backend')
     }
-  }, [runSkill])
+
+    // Sync queue back to DB
+    await fetch(`/api/projects/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ buildQueue: rest }),
+    })
+  }, [id, runSkill])
 
   // Resizable divider
   const onMouseDown = useCallback(
