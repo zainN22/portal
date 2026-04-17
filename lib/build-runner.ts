@@ -10,6 +10,7 @@
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { readSkill, setPhase, clearPreviewPort } from './project-manager'
 import { startPreview } from './preview-manager'
+import { getMessages, saveMessages } from './db'
 import path from 'path'
 import fs from 'fs'
 
@@ -40,11 +41,13 @@ export type Skill =
     | 'build-layout'
     | 'build-page'
     | 'build-backend'
+    | 'edit'
 
 export interface ActiveBuild {
     projectId: string
     skill: Skill
     pageName?: string
+    userRequest?: string
     status: BuildStatus
     events: BuildEvent[]
     error?: string
@@ -65,6 +68,7 @@ export function startBuild(
     projectDir: string,
     skill: Skill,
     pageName?: string,
+    userRequest?: string,
 ): boolean {
     const existing = builds.get(projectId)
     if (existing && existing.status === 'running') {
@@ -76,13 +80,14 @@ export function startBuild(
         projectId,
         skill,
         pageName,
+        userRequest,
         status: 'running',
         events: [],
     }
 
     builds.set(projectId, build)
 
-    console.log(`[build-runner] ▶ Starting background build: skill="${skill}", project="${projectId}"${pageName ? `, page="${pageName}"` : ''}`)
+    console.log(`[build-runner] ▶ Starting background build: skill="${skill}", project="${projectId}"${pageName ? `, page="${pageName}"` : ''}${userRequest ? `, request="${userRequest}"` : ''}`)
 
     // Fire-and-forget — intentionally NOT awaited
     runBuildAsync(build, projectDir).catch((err) => {
@@ -145,6 +150,7 @@ async function runSession(
     const fullPrompt = `${contextPrompt}\n${skillPrompt}${extraPrompt ? `\n\n${extraPrompt}` : ''}`
 
     let messageCount = 0
+    let accumulatedAssistantText = ''
 
     try {
         for await (const message of query({
@@ -164,6 +170,7 @@ async function runSession(
                 for (const block of message.message.content) {
                     if (block.type === 'text' && block.text.trim()) {
                         console.log(`[build-runner] Assistant text: ${block.text.slice(0, 100)}...`)
+                        accumulatedAssistantText += block.text
                         pushEvent(build, 'text', { text: block.text })
                     }
                     if (block.type === 'tool_use') {
@@ -188,11 +195,13 @@ async function runSession(
             }
         }
         console.log(`[build-runner] ✅ runSession finished: "${skillName}", total messages: ${messageCount}`)
+        return accumulatedAssistantText
     } catch (err) {
         const msg = String(err)
         if (msg.includes('maximum number of turns')) {
             console.warn(`[build-runner] ⚠️ Max turns reached for "${skillName}" after ${messageCount} messages`)
             pushEvent(build, 'warning', { message: `Session turn limit reached for "${skillName}". Work saved so far.` })
+            return accumulatedAssistantText
         } else {
             console.error(`[build-runner] ❌ Error in session "${skillName}":`, err)
             throw err
@@ -294,6 +303,35 @@ async function runBuildAsync(build: ActiveBuild, projectDir: string): Promise<vo
             setPhase(projectId, 'complete')
             pushEvent(build, 'done', { skill })
             console.log(`[build-runner] build-backend complete`)
+
+            // ── edit (user chat request) ──────────────────────────────────────────
+        } else if (skill === 'edit') {
+            const request = build.userRequest ?? ''
+            console.log(`[build-runner] Starting pipeline: edit "${request}"`)
+
+            // Save user message to DB first
+            const msgs = getMessages(projectId)
+            msgs.push({ role: 'user', content: request })
+            saveMessages(projectId, msgs)
+
+            setPhase(projectId, 'building')
+            pushEvent(build, 'phase', { label: 'Applying changes...' })
+            const assistantText = await runSession(
+                build,
+                projectDir,
+                'apply-change',
+                `## User request\n${request}`,
+            )
+
+            // Save assistant message to DB
+            const finalMsgs = getMessages(projectId)
+            finalMsgs.push({ role: 'assistant', content: assistantText || 'Changes applied!' })
+            saveMessages(projectId, finalMsgs)
+
+            setPhase(projectId, 'preview')
+            pushEvent(build, 'preview-refresh', {})
+            pushEvent(build, 'done', { skill })
+            console.log(`[build-runner] edit complete`)
         }
 
         build.status = 'done'

@@ -13,6 +13,7 @@ interface Props {
   onProceed: (dirPath: string, projectName: string, overviewContent: string) => void
   onApprove: () => void
   onPreviewRefresh?: () => void
+  onEditStart?: (request: string) => void
 }
 
 export function ChatPanel({
@@ -23,6 +24,7 @@ export function ChatPanel({
   onProceed,
   onApprove,
   onPreviewRefresh,
+  onEditStart,
 }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -68,7 +70,7 @@ export function ChatPanel({
           },
         ])
       })
-  }, [project.id])
+  }, [project.id, project.updatedAt])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -81,7 +83,7 @@ export function ChatPanel({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(msgs),
-    }).catch(() => {})
+    }).catch(() => { })
   }, [project.id])
 
   // ── Send a chat message to the gathering agent ────────────────────────────────
@@ -179,66 +181,13 @@ export function ChatPanel({
     if (!input.trim() || streaming) return
 
     const userMsg: ChatMessage = { role: 'user', content: input.trim() }
-    setMessages((prev) => {
-      const updated = [...prev, userMsg]
-      persistMessages(updated)
-      return updated
-    })
+    // optimistic update for UI
+    setMessages((prev) => [...prev, userMsg])
     setInput('')
-    setStreaming(true)
 
-    try {
-      const res = await fetch('/api/edit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: project.id, userRequest: userMsg.content }),
-      })
-
-      if (!res.body) return
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buf = ''
-      let summary = ''
-
-      let eventName = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += decoder.decode(value, { stream: true })
-        const lines = buf.split('\n')
-        buf = lines.pop() ?? ''
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            eventName = line.slice(7).trim()
-            continue
-          }
-          if (!line.startsWith('data: ')) continue
-          try {
-            const p = JSON.parse(line.slice(6))
-            if (p.text) summary += p.text as string
-            if (eventName === 'preview-refresh') onPreviewRefresh?.()
-          } catch {
-            /* ignore */
-          }
-          eventName = ''
-        }
-      }
-
-      if (summary) {
-        const assistantMsg: ChatMessage = { role: 'assistant', content: summary }
-        setMessages((prev) => {
-          const updated = [...prev, assistantMsg]
-          persistMessages(updated)
-          return updated
-        })
-      }
-    } finally {
-      setStreaming(false)
-      setTimeout(() => inputRef.current?.focus(), 0)
-    }
-  }, [input, streaming, project.id, onPreviewRefresh, persistMessages])
+    // Hand off to parent which will show the GenerationScreen and trigger the API
+    onEditStart?.(userMsg.content)
+  }, [input, streaming, onEditStart])
 
   // ── Directory + name submit → hand off to parent ──────────────────────────────
 

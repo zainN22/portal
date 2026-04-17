@@ -455,6 +455,41 @@ export function ProjectWorkspace({ id }: { id: string }) {
     [runSkill],
   )
 
+  // ── Manual edits from the chat panel ─────────────────────────────────────────
+  const handleEditStart = useCallback(async (userRequest: string) => {
+    console.log('[handleEditStart] Triggering background edit:', userRequest)
+    setGenEvents([])
+    setPhaseLabel('Applying changes...')
+    setIsBuilding(true)
+
+    try {
+      const res = await fetch('/api/edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: id, userRequest }),
+      })
+
+      if (!res.ok) {
+        console.error('[handleEditStart] Failed to trigger edit')
+        setIsBuilding(false)
+        return
+      }
+
+      // Reconnect to the events stream to show the logs
+      await connectToEvents(0)
+
+      // When done, re-fetch project to get updated messages/phase
+      const refreshRes = await fetch(`/api/projects/${id}`)
+      if (refreshRes.ok) {
+        setProject(await refreshRes.json())
+      }
+    } catch (err) {
+      console.error('[handleEditStart] Error:', err)
+    } finally {
+      setIsBuilding(false)
+    }
+  }, [id, connectToEvents])
+
   // ── Approve: run next item from the queue ────────────────────────────────────
   const handleApprove = useCallback(async () => {
     const queue = buildQueueRef.current
@@ -541,6 +576,7 @@ export function ProjectWorkspace({ id }: { id: string }) {
           onProceed={handleProceed}
           onApprove={handleApprove}
           onPreviewRefresh={handlePreviewRefresh}
+          onEditStart={handleEditStart}
         />
       </div>
 
