@@ -25,8 +25,17 @@ export function PreviewPanel({ port, phase, isRestarting = false, refreshTick = 
   const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
-    if (refreshTick > 0) setReloadKey((k) => k + 1)
+    if (refreshTick > 0) {
+      console.log('[PreviewPanel] 🔄 Refresh tick triggered, reloading iframe')
+      setReloadKey((k) => k + 1)
+    }
   }, [refreshTick])
+
+  if (port) {
+    console.log(`[PreviewPanel] 🌐 Preview active: http://localhost:${port}`)
+  } else {
+    console.log('[PreviewPanel] ⌛ Preview not ready (port is null)', { phase, isRestarting })
+  }
 
   const previewUrl = port ? `http://localhost:${port}` : null
 
@@ -42,11 +51,10 @@ export function PreviewPanel({ port, phase, isRestarting = false, refreshTick = 
               key={v}
               onClick={() => setViewport(v)}
               title={VIEWPORTS[v].label}
-              className={`flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 ${
-                viewport === v
-                  ? 'bg-violet-600 text-white shadow-sm shadow-violet-900/50'
-                  : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700'
-              }`}
+              className={`flex items-center justify-center w-7 h-7 rounded-md transition-all duration-150 ${viewport === v
+                ? 'bg-violet-600 text-white shadow-sm shadow-violet-900/50'
+                : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700'
+                }`}
             >
               {VIEWPORTS[v].icon}
             </button>

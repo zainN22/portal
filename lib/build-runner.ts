@@ -137,9 +137,13 @@ async function runSession(
     skillName: string,
     extraPrompt = '',
 ) {
-    console.log(`[build-runner] 🔄 runSession start: "${skillName}"`)
+    console.log(`[build-runner] 🔄 runSession start: "${skillName}" in ${projectDir}`)
     const skillPrompt = readSkill(projectDir, skillName)
-    const fullPrompt = extraPrompt ? `${skillPrompt}\n\n${extraPrompt}` : skillPrompt
+
+    // EXPLICIT PATH INJECTION: Force Claude to recognize the project root
+    const contextPrompt = `IMPORTANT: You are working in the project directory: ${projectDir}\nAll commands and file operations MUST be relative to this directory.\n`
+    const fullPrompt = `${contextPrompt}\n${skillPrompt}${extraPrompt ? `\n\n${extraPrompt}` : ''}`
+
     let messageCount = 0
 
     try {
@@ -159,19 +163,23 @@ async function runSession(
             if (message.type === 'assistant') {
                 for (const block of message.message.content) {
                     if (block.type === 'text' && block.text.trim()) {
+                        console.log(`[build-runner] Assistant text: ${block.text.slice(0, 100)}...`)
                         pushEvent(build, 'text', { text: block.text })
                     }
                     if (block.type === 'tool_use') {
-                        if (block.name === 'Write' || block.name === 'FileWrite') {
-                            const filePath = (block.input as Record<string, string>).file_path ?? ''
+                        console.log(`[build-runner] 🛠 Tool call: ${block.name}`, block.input)
+                        // Handle multiple possible tool names for writing/bash
+                        if (['Write', 'FileWrite', 'write_file', 'FileEdit', 'replace_file_content', 'multi_replace_file_content'].includes(block.name)) {
+                            const input = block.input as Record<string, string>
+                            const filePath = input.file_path || input.path || input.filepath || input.TargetFile || ''
                             const relative = filePath.startsWith(projectDir)
                                 ? filePath.slice(projectDir.length + 1)
                                 : filePath
-                            console.log(`[build-runner] 📝 File written: ${relative}`)
+                            console.log(`[build-runner] 📝 File write: ${relative}`)
                             pushEvent(build, 'file', { path: relative })
                         }
-                        if (block.name === 'Bash') {
-                            const cmd = (block.input as Record<string, string>).command ?? ''
+                        if (['Bash', 'bash', 'run_command', 'RunCommand', 'shell'].includes(block.name)) {
+                            const cmd = (block.input as Record<string, any>).command || (block.input as any).CommandLine || ''
                             console.log(`[build-runner] 💻 Shell: ${cmd.slice(0, 80)}`)
                             pushEvent(build, 'shell', { command: cmd.slice(0, 120) })
                         }
@@ -179,14 +187,14 @@ async function runSession(
                 }
             }
         }
-        console.log(`[build-runner] ✅ runSession complete: "${skillName}", total messages: ${messageCount}`)
+        console.log(`[build-runner] ✅ runSession finished: "${skillName}", total messages: ${messageCount}`)
     } catch (err) {
         const msg = String(err)
         if (msg.includes('maximum number of turns')) {
             console.warn(`[build-runner] ⚠️ Max turns reached for "${skillName}" after ${messageCount} messages`)
             pushEvent(build, 'warning', { message: `Session turn limit reached for "${skillName}". Work saved so far.` })
         } else {
-            console.error(`[build-runner] ❌ Error in "${skillName}":`, err)
+            console.error(`[build-runner] ❌ Error in session "${skillName}":`, err)
             throw err
         }
     }
@@ -206,7 +214,13 @@ async function runBuildAsync(build: ActiveBuild, projectDir: string): Promise<vo
             setPhase(projectId, 'writing-specs')
             pushEvent(build, 'phase', { label: 'Writing specs...' })
             await runSession(build, projectDir, 'generate-specs')
+
             const pages = discoverPages(projectDir)
+            // STRICT CHECK: Verify output
+            if (!fs.existsSync(path.join(projectDir, 'specs')) || !fs.existsSync(path.join(projectDir, 'CLAUDE.md'))) {
+                throw new Error('Skill generate-specs failed: No spec files or CLAUDE.md were written.')
+            }
+
             console.log(`[build-runner] Specs done. Discovered pages:`, pages)
             pushEvent(build, 'done', { skill, pages })
 
@@ -219,16 +233,16 @@ async function runBuildAsync(build: ActiveBuild, projectDir: string): Promise<vo
             await runSession(build, projectDir, 'scaffold-frontend')
 
             const clientDir = path.join(projectDir, 'client')
-            if (fs.existsSync(path.join(clientDir, 'package.json'))) {
-                console.log(`[build-runner] Starting preview server...`)
-                const port = await startPreview(projectId, projectDir)
-                console.log(`[build-runner] Preview server running on port ${port}`)
-                setPhase(projectId, 'preview')
-                pushEvent(build, 'preview-ready', { port })
-            } else {
-                console.warn(`[build-runner] No client/package.json found after scaffold`)
-                setPhase(projectId, 'preview')
+            // STRICT CHECK: Verify client folder exists
+            if (!fs.existsSync(path.join(clientDir, 'package.json'))) {
+                throw new Error('Skill scaffold-frontend failed: client/package.json was not created.')
             }
+
+            console.log(`[build-runner] Starting preview server...`)
+            const port = await startPreview(projectId, projectDir)
+            console.log(`[build-runner] Preview server running on port ${port}`)
+            setPhase(projectId, 'preview')
+            pushEvent(build, 'preview-ready', { port })
             pushEvent(build, 'done', { skill })
 
             // ── build-layout ───────────────────────────────────────────────────────
@@ -237,6 +251,12 @@ async function runBuildAsync(build: ActiveBuild, projectDir: string): Promise<vo
             setPhase(projectId, 'building')
             pushEvent(build, 'phase', { label: 'Building Navbar & Footer...' })
             await runSession(build, projectDir, 'build-layout')
+
+            // Validation check
+            if (!fs.existsSync(path.join(projectDir, 'documentation', 'layout.md'))) {
+                console.warn(`[build-runner] build-layout finished without creating documentation/layout.md`)
+            }
+
             setPhase(projectId, 'preview')
             pushEvent(build, 'preview-refresh', {})
             pushEvent(build, 'done', { skill })
@@ -265,6 +285,12 @@ async function runBuildAsync(build: ActiveBuild, projectDir: string): Promise<vo
             setPhase(projectId, 'building-backend')
             pushEvent(build, 'phase', { label: 'Building backend...' })
             await runSession(build, projectDir, 'build-backend')
+
+            // Validation
+            if (!fs.existsSync(path.join(projectDir, 'server', 'package.json'))) {
+                console.warn(`[build-runner] build-backend finished without creating server/package.json`)
+            }
+
             setPhase(projectId, 'complete')
             pushEvent(build, 'done', { skill })
             console.log(`[build-runner] build-backend complete`)

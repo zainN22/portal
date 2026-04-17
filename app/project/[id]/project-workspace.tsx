@@ -120,12 +120,14 @@ export function ProjectWorkspace({ id }: { id: string }) {
           }
 
           if (eventName === 'preview-ready' && payload.port) {
-            console.log(`[connectToEvents] 🖥 Preview ready on port ${payload.port}`)
-            setPreviewPort(payload.port as number)
+            const p = payload.port as number
+            console.log(`[connectToEvents] 🖥 Preview ready on port ${p}`)
+            setPreviewPort(p)
+            setProject((prev) => (prev ? { ...prev, previewPort: p } : prev)) // Sync project object
             if (!suppressPreviewRef.current) {
               setIsBuilding(false)
               setPhase('preview')
-              setProject((prev) => (prev ? { ...prev, phase: 'preview' } : prev))
+              setProject((prev) => (prev ? { ...prev, phase: 'preview', previewPort: p } : prev))
             }
           }
 
@@ -237,6 +239,7 @@ export function ProjectWorkspace({ id }: { id: string }) {
 
         setProject(p)
         setPhase(p.phase)
+        setPreviewPort(p.previewPort) // 👈 FIX 1: Initialize port state on mount
         setProjectName(p.name !== 'New Project' ? p.name : 'Your app')
 
         // ── RECONNECT: If project is in a building phase, reconnect to events stream.
@@ -247,9 +250,12 @@ export function ProjectWorkspace({ id }: { id: string }) {
           setPhaseLabel('Reconnecting to build...')
           setGenEvents([{ kind: 'phase', data: 'Reconnecting to build...' }])
 
+          let hasPortFromStream = false
           try {
             // Connect to the events endpoint — it will send all buffered events first
             await connectToEvents(0)
+            // If connectToEvents received a 'preview-ready' event, it already called setPreviewPort
+            if (previewPort) hasPortFromStream = true
           } catch (err) {
             console.error('[ProjectWorkspace] Events stream error:', err)
           }
@@ -260,12 +266,13 @@ export function ProjectWorkspace({ id }: { id: string }) {
             const refreshRes = await fetch(`/api/projects/${id}`, { signal: controller.signal })
             if (refreshRes.ok) {
               const updated: Project = await refreshRes.json()
-              console.log('[ProjectWorkspace] Post-build project state:', updated.phase)
+              console.log('[ProjectWorkspace] Post-build project state:', updated.phase, 'port:', updated.previewPort)
               setProject(updated)
               setPhase(updated.phase)
               setIsBuilding(false)
 
-              if ((updated.phase === 'preview' || updated.phase === 'complete')) {
+              // Only trigger a preview restart if we don't have a port yet
+              if ((updated.phase === 'preview' || updated.phase === 'complete') && !hasPortFromStream && !updated.previewPort) {
                 setPreviewLoading(true)
                 try {
                   const previewRes = await fetch(`/api/projects/${id}/preview`, {
@@ -281,6 +288,8 @@ export function ProjectWorkspace({ id }: { id: string }) {
                 } finally {
                   if (!cancelled) setPreviewLoading(false)
                 }
+              } else if (updated.previewPort) {
+                setPreviewPort(updated.previewPort)
               }
             }
           } catch {

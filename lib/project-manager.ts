@@ -64,6 +64,12 @@ export function setupProjectDir(
   // Write overview.md — this IS the requirements document
   fs.writeFileSync(path.join(projectDir, 'overview.md'), overviewContent, 'utf-8')
 
+  // PIN THE ROOT: Write a temporary CLAUDE.md before anything else.
+  // This prevents Claude Code from looking at parent directories (like /home/user)
+  // if they happen to have a CLAUDE.md or .git folder.
+  const tempClaudeMd = `# ${projectName}\n\nProject root: ${projectDir}\n`
+  fs.writeFileSync(path.join(projectDir, 'CLAUDE.md'), tempClaudeMd, 'utf-8')
+
   // Write .claude/commands/ skill files + .claude/examples/ sample specs
   writeSkillFiles(projectDir)
 
