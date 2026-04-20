@@ -14,6 +14,24 @@ import { getMessages, saveMessages } from './db'
 import path from 'path'
 import fs from 'fs'
 
+// ── Per-skill configuration ───────────────────────────────────────────────────
+
+const SKILL_CONFIG = {
+    'generate-specs':    { model: 'claude-sonnet-4-6',         maxTurns: 60, effort: 'high'   },
+    'scaffold-frontend': { model: 'claude-sonnet-4-6',         maxTurns: 40, effort: 'low'    },
+    'build-layout':      { model: 'claude-sonnet-4-6',         maxTurns: 35, effort: 'low'    },
+    'build-page':        { model: 'claude-opus-4-6',           maxTurns: 50, effort: 'medium' },
+    'build-backend':     { model: 'claude-opus-4-6',           maxTurns: 80, effort: 'high'   },
+    'apply-change':      { model: 'claude-haiku-4-5-20251001', maxTurns: 20, effort: 'low'    },
+} as const satisfies Record<string, { model: string; maxTurns: number; effort: 'low' | 'medium' | 'high' | 'max' }>
+
+const SHARED_AGENT_RULES = `
+You are a code-generation agent in a web app build pipeline. These rules apply to every session:
+- Never hardcode CSS colour values, spacing, or font names. Use the CSS custom properties defined in the global stylesheet.
+- Do NOT run npm install — all dependencies were installed during the scaffold phase. Exception: install a new package only if the user explicitly requests a new feature that requires it.
+- Read documentation/ handoff files for project context. Do not scan source files to understand the project.
+`.trim()
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type BuildEventKind =
@@ -152,12 +170,17 @@ async function runSession(
     let messageCount = 0
     let accumulatedAssistantText = ''
 
+    const { model, maxTurns, effort } = SKILL_CONFIG[skillName as keyof typeof SKILL_CONFIG] ?? SKILL_CONFIG['build-page']
+
     try {
         for await (const message of query({
             prompt: fullPrompt,
             options: {
                 cwd: projectDir,
-                maxTurns: 80,
+                model,
+                maxTurns,
+                effort,
+                systemPrompt: { type: 'preset', preset: 'claude_code', append: SHARED_AGENT_RULES },
                 permissionMode: 'bypassPermissions',
                 allowDangerouslySkipPermissions: true,
             },

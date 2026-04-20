@@ -273,9 +273,7 @@ Place them where the framework expects shared layout code (e.g. for Next.js:
 \`client/src/components/layout/\` + \`client/src/App.tsx\`).
 
 Rules:
-- Use CSS custom properties defined in the global stylesheet — never hardcode colours or spacing
 - Keep Navbar and Footer purely presentational — no data fetching
-- Do NOT run npm install — all packages were installed during scaffold
 
 ## Step 3 — Verify (type-check only)
 Run: \`cd client && npx tsc --noEmit\`
@@ -318,9 +316,7 @@ Read \`documentation/scaffold.md\` to confirm the framework routing conventions.
 - Place the page file where the framework expects it (e.g. for Next.js:
   \`client/src/app/{route}/page.tsx\`; for Vite: \`client/src/pages/{Route}.tsx\` wired via the router)
 - Reuse layout components from \`documentation/layout.md\` — do not recreate them
-- Use CSS custom properties from the global stylesheet — never hardcode colours
 - All copy must come from the spec — no placeholder text
-- Do NOT run npm install — all packages were installed during scaffold
 
 ## Step 3 — Verify (type-check only)
 Run: \`cd client && npx tsc --noEmit\`

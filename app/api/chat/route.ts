@@ -84,13 +84,27 @@ export async function POST(req: NextRequest) {
       try {
         let fullText = ''
 
+        const rawMessages = messages
+          .filter((m) => m.role === 'user' || m.role === 'assistant')
+          .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+
+        // Cache everything up to and including the last assistant turn
+        const lastAssistantIdx = rawMessages.reduce((last, m, i) => (m.role === 'assistant' ? i : last), -1)
+        const anthropicMessages: Anthropic.MessageParam[] = rawMessages.map((m, i) => {
+          if (i === lastAssistantIdx) {
+            return {
+              role: m.role,
+              content: [{ type: 'text' as const, text: m.content as string, cache_control: { type: 'ephemeral' as const } }],
+            }
+          }
+          return { role: m.role, content: m.content } as Anthropic.MessageParam
+        })
+
         const response = await anthropic.messages.create({
-          model: 'claude-sonnet-4-6',
+          model: 'claude-haiku-4-5-20251001',
           max_tokens: 2048,
-          system: GATHERING_SYSTEM,
-          messages: messages
-            .filter((m) => m.role === 'user' || m.role === 'assistant')
-            .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })) as Anthropic.MessageParam[],
+          system: [{ type: 'text', text: GATHERING_SYSTEM, cache_control: { type: 'ephemeral' } }],
+          messages: anthropicMessages,
           stream: true,
         })
 
