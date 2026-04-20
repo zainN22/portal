@@ -355,6 +355,7 @@ export function ProjectWorkspace({ id }: { id: string }) {
         }
       })
       .catch((err) => {
+        if (err?.name === 'AbortError') return
         console.error('[ProjectWorkspace] Failed to load project:', err)
         if (!cancelled) router.push('/')
       })
